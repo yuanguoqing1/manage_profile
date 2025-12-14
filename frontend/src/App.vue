@@ -80,11 +80,12 @@ onMounted(loadData)
 </script>
 
 <template>
+
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
         <span class="dot"></span>
-        <div class="brand-meta">
+        <div>
           <div class="brand-name">Balance Admin</div>
           <div class="brand-sub">Vue + FastAPI</div>
         </div>
@@ -227,9 +228,7 @@ onMounted(loadData)
                 <td>{{ item.label }}</td>
                 <td><span class="tag">{{ item.key }}</span></td>
                 <td>{{ item.owner_id || '未绑定' }}</td>
-                <td>
-                  <button class="ghost danger" @click="deleteKey(item.id)">删除</button>
-                </td>
+                <td><button class="ghost danger" @click="deleteKey(item.id)">删除</button></td>
               </tr>
               <tr v-if="!keys.length">
                 <td colspan="5" class="muted">暂无数据</td>
@@ -239,5 +238,101 @@ onMounted(loadData)
         </div>
       </section>
     </main>
+  <div class="container">
+    <h1>余额 &amp; AI Key 管理</h1>
+    <p class="helper">后端 FastAPI + 前端 Vue 3 / Vite</p>
+
+    <div class="grid">
+      <div class="card">
+        <h2>概览</h2>
+        <p>用户数：<strong>{{ summary.user_count }}</strong></p>
+        <p>API Keys：<strong>{{ summary.api_key_count }}</strong></p>
+        <p>余额合计：<strong>{{ summary.total_balance.toFixed(2) }}</strong></p>
+        <p class="helper" v-if="loading">正在加载数据…</p>
+      </div>
+
+      <div class="card">
+        <h2>新建用户</h2>
+        <label>昵称</label>
+        <input v-model="newUser.name" placeholder="如：运营账号" />
+        <label>初始余额</label>
+        <input type="number" v-model.number="newUser.balance" min="0" step="0.01" />
+        <button :disabled="!newUser.name" @click="createUser">创建</button>
+      </div>
+
+      <div class="card">
+        <h2>调整余额</h2>
+        <label>用户 ID</label>
+        <input v-model="balanceUpdate.userId" placeholder="输入用户 ID" />
+        <label>调整金额（可正可负）</label>
+        <input type="number" v-model.number="balanceUpdate.amount" step="0.01" />
+        <button :disabled="!balanceUpdate.userId" @click="updateBalance">更新</button>
+      </div>
+
+      <div class="card">
+        <h2>新建 API Key</h2>
+        <label>Key 描述</label>
+        <input v-model="newKey.label" placeholder="如：生产环境 Key" />
+        <label>Key 值</label>
+        <input v-model="newKey.key" placeholder="sk-xxxx" />
+        <label>绑定用户 ID（可选）</label>
+        <input v-model="newKey.owner_id" placeholder="用户 ID" />
+        <button :disabled="!newKey.label || !newKey.key" @click="createApiKey">保存</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="actions">
+        <h2>用户列表</h2>
+        <button style="width:auto" @click="loadData">刷新</button>
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>昵称</th>
+            <th>余额</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="user in users" :key="user.id">
+            <td>{{ user.id }}</td>
+            <td>{{ user.name }}</td>
+            <td>{{ user.balance.toFixed(2) }}</td>
+          </tr>
+          <tr v-if="!users.length">
+            <td colspan="3" class="helper">暂无数据</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>API Keys</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>描述</th>
+            <th>Key</th>
+            <th>绑定用户</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in keys" :key="item.id">
+            <td>{{ item.id }}</td>
+            <td>{{ item.label }}</td>
+            <td><span class="tag">{{ item.key }}</span></td>
+            <td>{{ item.owner_id || '未绑定' }}</td>
+            <td><button @click="deleteKey(item.id)">删除</button></td>
+          </tr>
+          <tr v-if="!keys.length">
+            <td colspan="5" class="helper">暂无数据</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
   </div>
 </template>
