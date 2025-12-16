@@ -11,7 +11,6 @@ const token = ref(localStorage.getItem('token') || '')
 const currentUser = ref(JSON.parse(localStorage.getItem('user') || 'null'))
 
 const dashboard = ref({
-  summary: { user_count: 0, total_balance: 0, api_key_count: 0 },
   redis: { register_count: 0, online_count: 0 },
   date: '',
   ip: '',
@@ -19,15 +18,21 @@ const dashboard = ref({
 })
 
 const users = ref([])
-const keys = ref([])
-const selectedKey = ref(null)
+const models = ref([])
+const selectedModel = ref(null)
+const categories = ref([])
+const pages = ref([])
+const selectedCategory = ref(null)
+const logs = ref([])
 const roleStats = ref({ admin: 0, user: 0 })
 
 const modals = ref({
   login: false,
   register: false,
   user: false,
-  key: false,
+  model: false,
+  category: false,
+  page: false,
   role: false,
 })
 
@@ -35,7 +40,17 @@ const forms = ref({
   login: { name: '', password: '' },
   register: { name: '', password: '', role: 'user' },
   user: { name: '', password: '', role: 'user' },
-  key: { label: '', key: '', owner_id: '' },
+  model: {
+    name: '',
+    base_url: '',
+    api_key: '',
+    model_name: '',
+    max_tokens: 4096,
+    temperature: 1,
+    owner_id: '',
+  },
+  category: { name: '', description: '' },
+  page: { category_id: '', url: '', account: '', password: '', cookie: '', note: '' },
   balance: { userId: '', amount: 0 },
   role: { user_id: '', role: 'user' },
 })
@@ -92,12 +107,25 @@ async function fetchUsers() {
   users.value = await request('/users')
 }
 
-async function fetchKeys() {
-  keys.value = await request('/apikeys')
-  if (selectedKey.value) {
-    const refreshed = keys.value.find((k) => k.id === selectedKey.value.id)
-    selectedKey.value = refreshed || null
+async function fetchModels() {
+  models.value = await request('/models')
+  if (selectedModel.value) {
+    const refreshed = models.value.find((m) => m.id === selectedModel.value.id)
+    selectedModel.value = refreshed || null
   }
+}
+
+async function fetchCategories() {
+  categories.value = await request('/web/categories')
+  if (selectedCategory.value) {
+    const refreshed = categories.value.find((c) => c.id === selectedCategory.value.id)
+    selectedCategory.value = refreshed || null
+  }
+}
+
+async function fetchPages(categoryId = null) {
+  const query = categoryId ? `?category_id=${categoryId}` : ''
+  pages.value = await request(`/web/pages${query}`)
 }
 
 async function fetchRoles() {
@@ -109,10 +137,27 @@ async function fetchRoles() {
   roleStats.value = res.roles
 }
 
+async function fetchLogs() {
+  if (!isAdmin.value) {
+    logs.value = []
+    return
+  }
+  const res = await request('/logs')
+  logs.value = res.lines || []
+}
+
 async function syncAll() {
   loading.value = true
   try {
-    await Promise.all([fetchDashboard(), fetchKeys(), fetchUsers(), fetchRoles()])
+    await Promise.all([
+      fetchDashboard(),
+      fetchModels(),
+      fetchCategories(),
+      fetchPages(selectedCategory.value?.id || null),
+      fetchUsers(),
+      fetchRoles(),
+      fetchLogs(),
+    ])
     setStatus('success', '数据已同步')
   } catch (error) {
     setStatus('error', error.message)
@@ -158,15 +203,12 @@ async function handleLogout() {
     console.warn('登出提示：', error.message)
   }
   clearAuth()
-  keys.value = []
+  models.value = []
   users.value = []
-  dashboard.value = {
-    summary: { user_count: 0, total_balance: 0, api_key_count: 0 },
-    redis: { register_count: 0, online_count: 0 },
-    date: '',
-    ip: '',
-    weather: '',
-  }
+  categories.value = []
+  pages.value = []
+  logs.value = []
+  dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
 }
 
 async function createUser() {
@@ -179,7 +221,6 @@ async function createUser() {
     modals.value.user = false
     forms.value.user = { name: '', password: '', role: 'user' }
     await fetchUsers()
-    await fetchDashboard()
   } catch (error) {
     setStatus('error', error.message)
   }
@@ -194,34 +235,101 @@ async function updateBalance(userId) {
     setStatus('success', '余额已更新')
     forms.value.balance = { userId: '', amount: 0 }
     await fetchUsers()
-    await fetchDashboard()
   } catch (error) {
     setStatus('error', error.message)
   }
 }
 
-async function createApiKey() {
+async function createModel() {
   try {
-    const payload = { ...forms.value.key, owner_id: forms.value.key.owner_id || null }
-    await request('/apikeys', {
+    const payload = { ...forms.value.model, owner_id: forms.value.model.owner_id || null }
+    await request('/models', {
       method: 'POST',
       body: JSON.stringify(payload),
     })
-    setStatus('success', 'API Key 已创建')
-    modals.value.key = false
-    forms.value.key = { label: '', key: '', owner_id: '' }
-    await fetchKeys()
+    setStatus('success', '大模型配置已创建')
+    modals.value.model = false
+    forms.value.model = {
+      name: '',
+      base_url: '',
+      api_key: '',
+      model_name: '',
+      max_tokens: 4096,
+      temperature: 1,
+      owner_id: '',
+    }
+    await fetchModels()
   } catch (error) {
     setStatus('error', error.message)
   }
 }
 
-async function deleteKey(id) {
-  if (!confirm('确认删除该 Key 吗？')) return
+async function deleteModel(id) {
+  if (!confirm('确认删除该配置吗？')) return
   try {
-    await request(`/apikeys/${id}`, { method: 'DELETE' })
-    setStatus('success', 'API Key 已删除')
-    await fetchKeys()
+    await request(`/models/${id}`, { method: 'DELETE' })
+    setStatus('success', '配置已删除')
+    selectedModel.value = null
+    await fetchModels()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function openModelDetail(item) {
+  selectedModel.value = item
+}
+
+async function createCategory() {
+  try {
+    await request('/web/categories', {
+      method: 'POST',
+      body: JSON.stringify(forms.value.category),
+    })
+    setStatus('success', '分类已创建')
+    modals.value.category = false
+    forms.value.category = { name: '', description: '' }
+    await fetchCategories()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deleteCategory(id) {
+  if (!confirm('确认删除该分类及其网页吗？')) return
+  try {
+    await request(`/web/categories/${id}`, { method: 'DELETE' })
+    setStatus('success', '分类已删除')
+    selectedCategory.value = null
+    pages.value = []
+    await fetchCategories()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function createPage() {
+  try {
+    const payload = { ...forms.value.page, category_id: Number(forms.value.page.category_id) }
+    await request('/web/pages', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    setStatus('success', '网页已保存')
+    modals.value.page = false
+    forms.value.page = { category_id: '', url: '', account: '', password: '', cookie: '', note: '' }
+    await fetchPages(selectedCategory.value?.id || null)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deletePage(id) {
+  if (!confirm('确认删除该网页记录吗？')) return
+  try {
+    await request(`/web/pages/${id}`, { method: 'DELETE' })
+    setStatus('success', '网页已删除')
+    await fetchPages(selectedCategory.value?.id || null)
   } catch (error) {
     setStatus('error', error.message)
   }
@@ -245,10 +353,6 @@ async function assignRole() {
   }
 }
 
-function openKeyDetail(item) {
-  selectedKey.value = item
-}
-
 onMounted(() => {
   if (token.value) {
     syncAll()
@@ -263,15 +367,22 @@ onMounted(() => {
         <div class="logo">PM</div>
         <div>
           <div class="brand-name">个人管理系统</div>
+          <div class="brand-sub">分工明确 · 一键直达</div>
         </div>
       </div>
       <nav class="menu">
         <button :class="{ active: activeMenu === 'home' }" @click="activeMenu = 'home'">首页</button>
+        <button :class="{ active: activeMenu === 'models' }" @click="activeMenu = 'models'" :disabled="!isAuthed">
+          大模型管理
+        </button>
+        <button :class="{ active: activeMenu === 'web' }" @click="activeMenu = 'web'" :disabled="!isAuthed">
+          网页收藏
+        </button>
         <button :class="{ active: activeMenu === 'users' }" @click="activeMenu = 'users'" :disabled="!isAdmin">
           用户与角色
         </button>
-        <button :class="{ active: activeMenu === 'keys' }" @click="activeMenu = 'keys'" :disabled="!isAuthed">
-          API Keys
+        <button :class="{ active: activeMenu === 'logs' }" @click="activeMenu = 'logs'" :disabled="!isAdmin">
+          日志记录
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -284,7 +395,7 @@ onMounted(() => {
       <header class="topbar">
         <div>
           <p class="eyebrow">管理控制台</p>
-          <h1>账户 · 权限 · API Keys</h1>
+          <h1>数据面板 · 精准分区</h1>
         </div>
         <div class="top-actions">
           <button class="ghost" @click="syncAll" :disabled="!isAuthed || loading">刷新</button>
@@ -311,22 +422,7 @@ onMounted(() => {
       <template v-else>
         <section v-if="loading" class="loading-banner">正在加载...</section>
 
-        <section class="panel-grid">
-          <div class="panel stat">
-            <p class="label">用户数</p>
-            <h2>{{ dashboard.summary.user_count }}</h2>
-            <p class="muted">全局用户</p>
-          </div>
-          <div class="panel stat">
-            <p class="label">API Keys</p>
-            <h2>{{ dashboard.summary.api_key_count }}</h2>
-            <p class="muted">登记密钥</p>
-          </div>
-          <div class="panel stat">
-            <p class="label">余额合计</p>
-            <h2>¥ {{ dashboard.summary.total_balance.toFixed(2) }}</h2>
-            <p class="muted">当前资金</p>
-          </div>
+        <section class="panel-grid" v-if="activeMenu === 'home'">
           <div class="panel stat">
             <p class="label">Redis 注册数</p>
             <h2>{{ dashboard.redis.register_count }}</h2>
@@ -337,46 +433,142 @@ onMounted(() => {
             <h2>{{ dashboard.redis.online_count }}</h2>
             <p class="muted">实时在线</p>
           </div>
-          <div class="panel stat wide">
-            <p class="label">今日信息</p>
-            <div class="info-row">
-              <span>时间</span>
-              <strong>{{ dashboard.date || '-' }}</strong>
+          <div class="panel stat">
+            <p class="label">当前时间</p>
+            <h2>{{ dashboard.date || '-' }}</h2>
+            <p class="muted">本地服务器时间</p>
+          </div>
+          <div class="panel stat">
+            <p class="label">IP 信息</p>
+            <h2>{{ dashboard.ip || '-' }}</h2>
+            <p class="muted">请求来源</p>
+          </div>
+          <div class="panel stat">
+            <p class="label">天气</p>
+            <h2>{{ dashboard.weather || '晴朗' }}</h2>
+            <p class="muted">简易天气展示</p>
+          </div>
+        </section>
+
+        <section class="panel" v-if="activeMenu === 'models'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">大模型</p>
+              <h3>模型访问配置</h3>
             </div>
-            <div class="info-row">
-              <span>IP</span>
-              <strong>{{ dashboard.ip || '-' }}</strong>
+            <div class="header-actions">
+              <button class="outline" @click="syncAll" :disabled="loading">同步</button>
+              <button @click="modals.model = true" :disabled="!isAdmin">新建配置</button>
             </div>
-            <div class="info-row">
-              <span>天气</span>
-              <strong>{{ dashboard.weather || '晴朗' }}</strong>
+          </div>
+          <div class="table-wrapper two-column">
+            <div class="table-panel">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>名称</th>
+                    <th>模型</th>
+                    <th>最大 Token</th>
+                    <th v-if="isAdmin">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in models" :key="item.id" @click="openModelDetail(item)" class="clickable">
+                    <td>{{ item.id }}</td>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.model_name }}</td>
+                    <td>{{ item.max_tokens }}</td>
+                    <td v-if="isAdmin"><button class="ghost danger" @click.stop="deleteModel(item.id)">删除</button></td>
+                  </tr>
+                  <tr v-if="!models.length">
+                    <td colspan="5" class="muted">暂无配置</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="detail-panel" v-if="selectedModel">
+              <h4>模型详情</h4>
+              <p class="muted">点击列表即可查看详情</p>
+              <ul class="detail-list">
+                <li><span>名称</span><strong>{{ selectedModel.name }}</strong></li>
+                <li><span>接口地址</span><strong>{{ selectedModel.base_url }}</strong></li>
+                <li><span>模型</span><strong>{{ selectedModel.model_name }}</strong></li>
+                <li><span>密钥</span><strong>{{ selectedModel.api_key }}</strong></li>
+                <li><span>最大 Token</span><strong>{{ selectedModel.max_tokens }}</strong></li>
+                <li><span>温度</span><strong>{{ selectedModel.temperature }}</strong></li>
+                <li><span>绑定用户</span><strong>{{ selectedModel.owner_id || '无' }}</strong></li>
+              </ul>
             </div>
           </div>
         </section>
 
-        <!-- <section class="panel" v-if="activeMenu === 'home'">
+        <section class="panel" v-if="activeMenu === 'web'">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">说明</p>
-              <h3>功能入口</h3>
+              <p class="eyebrow">网页收藏</p>
+              <h3>分类与账号信息</h3>
             </div>
-            <div class="tag">每个按钮只做一件事</div>
-          </div>
-          <div class="action-grid">
-            <div class="action-card" @click="activeMenu = 'keys'">
-              <h4>API Key 查看</h4>
-              <p class="muted">点击进入即可查看详情与创建</p>
-            </div>
-            <div class="action-card" :class="{ disabled: !isAdmin }" @click="isAdmin && (activeMenu = 'users')">
-              <h4>用户/角色</h4>
-              <p class="muted">管理员入口：管理账号与权限</p>
-            </div>
-            <div class="action-card" @click="syncAll">
-              <h4>刷新数据</h4>
-              <p class="muted">同步 Redis 与仪表盘数据</p>
+            <div class="header-actions">
+              <button class="outline" @click="fetchPages(selectedCategory?.id || null)" :disabled="!categories.length">刷新网页</button>
+              <button class="outline" @click="modals.category = true" :disabled="!isAdmin">新建分类</button>
+              <button @click="modals.page = true" :disabled="!isAdmin || !categories.length">新增网页</button>
             </div>
           </div>
-        </section> -->
+          <div class="table-wrapper two-column">
+            <div class="table-panel">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>分类</th>
+                    <th>描述</th>
+                    <th v-if="isAdmin">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="item in categories"
+                    :key="item.id"
+                    @click="selectedCategory = item; fetchPages(item.id)"
+                    class="clickable"
+                  >
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.description || '无' }}</td>
+                    <td v-if="isAdmin"><button class="ghost danger" @click.stop="deleteCategory(item.id)">删除</button></td>
+                  </tr>
+                  <tr v-if="!categories.length">
+                    <td colspan="3" class="muted">暂无分类</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-panel">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>网址</th>
+                    <th>账号</th>
+                    <th>密码</th>
+                    <th>备注</th>
+                    <th v-if="isAdmin">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="page in pages" :key="page.id">
+                    <td>{{ page.url }}</td>
+                    <td>{{ page.account || '无' }}</td>
+                    <td>{{ page.password || '无' }}</td>
+                    <td>{{ page.note || '无' }}</td>
+                    <td v-if="isAdmin"><button class="ghost danger" @click="deletePage(page.id)">删除</button></td>
+                  </tr>
+                  <tr v-if="!pages.length">
+                    <td colspan="5" class="muted">请选择分类查看或暂无记录</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
 
         <section class="panel" v-if="activeMenu === 'users' && isAdmin">
           <div class="panel-header">
@@ -426,52 +618,32 @@ onMounted(() => {
           </div>
         </section>
 
-        <section class="panel" v-if="activeMenu === 'keys'">
+        <section class="panel" v-if="activeMenu === 'logs' && isAdmin">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">API</p>
-              <h3>API Key 管理</h3>
+              <p class="eyebrow">日志</p>
+              <h3>后端运行记录</h3>
             </div>
             <div class="header-actions">
-              <button class="outline" @click="syncAll" :disabled="loading">同步</button>
-              <button @click="modals.key = true" :disabled="!isAdmin">新建 API Key</button>
+              <button class="outline" @click="fetchLogs">刷新日志</button>
             </div>
           </div>
-          <div class="table-wrapper two-column">
-            <div class="table-panel">
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>描述</th>
-                    <th>Key</th>
-                    <th>绑定用户</th>
-                    <th v-if="isAdmin">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in keys" :key="item.id" @click="openKeyDetail(item)" class="clickable">
-                    <td>{{ item.id }}</td>
-                    <td>{{ item.label }}</td>
-                    <td><span class="tag">{{ item.key }}</span></td>
-                    <td>{{ item.owner_id || '未绑定' }}</td>
-                    <td v-if="isAdmin"><button class="ghost danger" @click.stop="deleteKey(item.id)">删除</button></td>
-                  </tr>
-                  <tr v-if="!keys.length">
-                    <td colspan="5" class="muted">暂无数据</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="detail-panel" v-if="selectedKey">
-              <h4>API 详情</h4>
-              <p class="muted">点击列表即可在此查看详情</p>
-              <ul class="detail-list">
-                <li><span>描述</span><strong>{{ selectedKey.label }}</strong></li>
-                <li><span>Key</span><strong>{{ selectedKey.key }}</strong></li>
-                <li><span>绑定用户</span><strong>{{ selectedKey.owner_id || '未绑定' }}</strong></li>
-              </ul>
-            </div>
+          <div class="table-wrapper">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>最近日志</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(line, idx) in logs" :key="idx">
+                  <td>{{ line }}</td>
+                </tr>
+                <tr v-if="!logs.length">
+                  <td class="muted">暂无日志记录</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
       </template>
@@ -528,19 +700,66 @@ onMounted(() => {
         </div>
       </div>
 
-      <div v-if="modals.key" class="modal-mask">
+      <div v-if="modals.model" class="modal-mask">
         <div class="modal">
           <div class="modal-header">
-            <h3>新建 API Key</h3>
-            <button class="icon" @click="modals.key = false">×</button>
+            <h3>新建模型配置</h3>
+            <button class="icon" @click="modals.model = false">×</button>
           </div>
-          <label>描述</label>
-          <input v-model="forms.key.label" placeholder="如：生产环境 Key" />
-          <label>Key 值</label>
-          <input v-model="forms.key.key" placeholder="sk-xxxx" />
+          <label>名称</label>
+          <input v-model="forms.model.name" placeholder="如：内部 GPT" />
+          <label>接口地址</label>
+          <input v-model="forms.model.base_url" placeholder="https://api.example.com" />
+          <label>模型名称</label>
+          <input v-model="forms.model.model_name" placeholder="gpt-4o" />
+          <label>密钥</label>
+          <input v-model="forms.model.api_key" placeholder="sk-xxxx" />
+          <label>最大 Token</label>
+          <input v-model.number="forms.model.max_tokens" type="number" placeholder="4096" />
+          <label>温度</label>
+          <input v-model.number="forms.model.temperature" type="number" step="0.1" placeholder="1" />
           <label>绑定用户 ID（可选）</label>
-          <input v-model="forms.key.owner_id" placeholder="用户 ID" />
-          <button @click="createApiKey">保存</button>
+          <input v-model="forms.model.owner_id" placeholder="用户 ID" />
+          <button @click="createModel">保存</button>
+        </div>
+      </div>
+
+      <div v-if="modals.category" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>新建分类</h3>
+            <button class="icon" @click="modals.category = false">×</button>
+          </div>
+          <label>分类名称</label>
+          <input v-model="forms.category.name" placeholder="如：工作" />
+          <label>描述</label>
+          <input v-model="forms.category.description" placeholder="可选描述" />
+          <button @click="createCategory">保存</button>
+        </div>
+      </div>
+
+      <div v-if="modals.page" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>新增网页</h3>
+            <button class="icon" @click="modals.page = false">×</button>
+          </div>
+          <label>所属分类</label>
+          <select v-model="forms.page.category_id">
+            <option value="" disabled>请选择</option>
+            <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+          </select>
+          <label>网址</label>
+          <input v-model="forms.page.url" placeholder="https://..." />
+          <label>账号</label>
+          <input v-model="forms.page.account" placeholder="账号（可选）" />
+          <label>密码</label>
+          <input v-model="forms.page.password" placeholder="密码（可选）" />
+          <label>Cookie</label>
+          <input v-model="forms.page.cookie" placeholder="Cookie（可选）" />
+          <label>备注</label>
+          <input v-model="forms.page.note" placeholder="备注信息" />
+          <button @click="createPage">保存</button>
         </div>
       </div>
 
