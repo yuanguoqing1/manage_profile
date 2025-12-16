@@ -262,8 +262,7 @@ onMounted(() => {
       <div class="brand">
         <div class="logo">PM</div>
         <div>
-          <div class="brand-name">Profile Manager</div>
-          <div class="brand-sub">Vue + FastAPI</div>
+          <div class="brand-name">个人管理系统</div>
         </div>
       </div>
       <nav class="menu">
@@ -276,7 +275,7 @@ onMounted(() => {
         </button>
       </nav>
       <div class="sidebar-footer">
-        <p class="muted">Redis 注册数：{{ dashboard.redis.register_count }}</p>
+        <p class="muted">注册数：{{ dashboard.redis.register_count }}</p>
         <p class="muted">在线人数：{{ dashboard.redis.online_count }}</p>
       </div>
     </aside>
@@ -355,7 +354,7 @@ onMounted(() => {
           </div>
         </section>
 
-        <section class="panel" v-if="activeMenu === 'home'">
+        <!-- <section class="panel" v-if="activeMenu === 'home'">
           <div class="panel-header">
             <div>
               <p class="eyebrow">说明</p>
@@ -377,7 +376,7 @@ onMounted(() => {
               <p class="muted">同步 Redis 与仪表盘数据</p>
             </div>
           </div>
-        </section>
+        </section> -->
 
         <section class="panel" v-if="activeMenu === 'users' && isAdmin">
           <div class="panel-header">
