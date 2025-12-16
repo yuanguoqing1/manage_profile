@@ -26,28 +26,13 @@ const pages = ref([])
 const selectedCategory = ref(null)
 const logs = ref([])
 const roleStats = ref({ admin: 0, user: 0 })
+const rolePrompts = ref([])
+const selectedRoleId = ref(null)
+const editingRolePrompt = ref(null)
 const chatMessages = ref([])
 const chatInput = ref('')
 const chatModelId = ref(null)
-const chatRole = ref('general')
-
-const rolePresets = [
-  {
-    key: 'general',
-    name: '通用助手',
-    prompt: '你是一个耐心且高效的通用助手，请用简洁中文回答。',
-  },
-  {
-    key: 'engineer',
-    name: '工程专家',
-    prompt: '你是一名严谨的资深工程师，请给出可执行、分步骤的解决方案。',
-  },
-  {
-    key: 'pm',
-    name: '产品经理',
-    prompt: '你是一名产品经理，请以业务价值和用户体验为核心给出建议。',
-  },
-]
+const defaultRolePrompt = '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
 
 const modals = ref({
   login: false,
@@ -57,13 +42,28 @@ const modals = ref({
   category: false,
   page: false,
   role: false,
+  rolePrompt: false,
+  rolePromptEdit: false,
+  userEdit: false,
+  modelEdit: false,
 })
 
 const forms = ref({
   login: { name: '', password: '' },
   register: { name: '', password: '', role: 'user' },
   user: { name: '', password: '', role: 'user' },
+  editUser: { id: null, name: '', password: '', role: 'user' },
   model: {
+    name: '',
+    base_url: '',
+    api_key: '',
+    model_name: '',
+    max_tokens: 4096,
+    temperature: 1,
+    owner_id: '',
+  },
+  editModel: {
+    id: null,
     name: '',
     base_url: '',
     api_key: '',
@@ -76,12 +76,18 @@ const forms = ref({
   page: { category_id: '', url: '', account: '', password: '', cookie: '', note: '' },
   balance: { userId: '', amount: 0 },
   role: { user_id: '', role: 'user' },
+  rolePrompt: { name: '', prompt: '' },
+  editRolePrompt: { id: null, name: '', prompt: '' },
 })
 
 const isAuthed = computed(() => Boolean(token.value))
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const currentChatModel = computed(() => models.value.find((m) => m.id === chatModelId.value))
-const currentRolePrompt = computed(() => rolePresets.find((item) => item.key === chatRole.value)?.prompt || '')
+const currentRolePrompt = computed(() => {
+  const target = rolePrompts.value.find((item) => item.id === selectedRoleId.value)
+  if (target) return target.prompt
+  return defaultRolePrompt
+})
 
 function setStatus(type, message) {
   status.value = { type, message }
@@ -102,6 +108,8 @@ function setAuth(newToken, user) {
 function clearAuth() {
   token.value = ''
   currentUser.value = null
+  rolePrompts.value = []
+  selectedRoleId.value = null
   localStorage.removeItem('token')
   localStorage.removeItem('user')
 }
@@ -152,6 +160,8 @@ async function request(path, options = {}) {
     categories.value = []
     pages.value = []
     logs.value = []
+    rolePrompts.value = []
+    selectedRoleId.value = null
     chatMessages.value = []
     chatInput.value = ''
     dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
@@ -210,6 +220,14 @@ async function fetchRoles() {
   roleStats.value = res.roles
 }
 
+async function fetchRolePrompts() {
+  const res = await request('/role-prompts')
+  rolePrompts.value = res
+  if (!selectedRoleId.value && rolePrompts.value.length) {
+    selectedRoleId.value = rolePrompts.value[0].id
+  }
+}
+
 async function fetchLogs() {
   if (!isAdmin.value) {
     logs.value = []
@@ -229,6 +247,7 @@ async function syncAll() {
       fetchPages(selectedCategory.value?.id || null),
       fetchUsers(),
       fetchRoles(),
+      fetchRolePrompts(),
       fetchLogs(),
     ])
     setStatus('success', '数据已同步')
@@ -281,6 +300,8 @@ async function handleLogout() {
   categories.value = []
   pages.value = []
   logs.value = []
+  rolePrompts.value = []
+  selectedRoleId.value = null
   chatMessages.value = []
   chatInput.value = ''
   dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
@@ -353,6 +374,40 @@ async function deleteModel(id) {
 
 function openModelDetail(item) {
   selectedModel.value = item
+  forms.value.editModel = {
+    id: item.id,
+    name: item.name,
+    base_url: item.base_url,
+    api_key: item.api_key,
+    model_name: item.model_name,
+    max_tokens: item.max_tokens,
+    temperature: item.temperature,
+    owner_id: item.owner_id ?? '',
+  }
+}
+
+async function updateModel() {
+  if (!forms.value.editModel.id) return
+  const payload = {
+    name: forms.value.editModel.name,
+    base_url: forms.value.editModel.base_url,
+    api_key: forms.value.editModel.api_key,
+    model_name: forms.value.editModel.model_name,
+    max_tokens: Number(forms.value.editModel.max_tokens),
+    temperature: Number(forms.value.editModel.temperature),
+    owner_id: forms.value.editModel.owner_id || null,
+  }
+  try {
+    await request(`/models/${forms.value.editModel.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+    setStatus('success', '模型已更新')
+    modals.value.modelEdit = false
+    await fetchModels()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
 }
 
 async function createCategory() {
@@ -428,6 +483,97 @@ async function assignRole() {
   }
 }
 
+async function createRolePrompt() {
+  try {
+    await request('/role-prompts', {
+      method: 'POST',
+      body: JSON.stringify(forms.value.rolePrompt),
+    })
+    setStatus('success', '提示词已创建')
+    forms.value.rolePrompt = { name: '', prompt: '' }
+    modals.value.rolePrompt = false
+    await fetchRolePrompts()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function openEditRolePrompt(item) {
+  editingRolePrompt.value = item
+  forms.value.editRolePrompt = { ...item }
+  modals.value.rolePromptEdit = true
+}
+
+async function updateRolePrompt() {
+  if (!forms.value.editRolePrompt.id) return
+  try {
+    await request(`/role-prompts/${forms.value.editRolePrompt.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: forms.value.editRolePrompt.name,
+        prompt: forms.value.editRolePrompt.prompt,
+      }),
+    })
+    setStatus('success', '提示词已更新')
+    modals.value.rolePromptEdit = false
+    editingRolePrompt.value = null
+    forms.value.editRolePrompt = { id: null, name: '', prompt: '' }
+    await fetchRolePrompts()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deleteRolePrompt(id) {
+  if (!confirm('确认删除该提示词吗？')) return
+  try {
+    await request(`/role-prompts/${id}`, { method: 'DELETE' })
+    setStatus('success', '提示词已删除')
+    if (selectedRoleId.value === id) {
+      selectedRoleId.value = rolePrompts.value.find((item) => item.id !== id)?.id || null
+    }
+    await fetchRolePrompts()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function openEditUser(user) {
+  forms.value.editUser = { id: user.id, name: user.name, password: '', role: user.role }
+  modals.value.userEdit = true
+}
+
+async function updateUser() {
+  if (!forms.value.editUser.id) return
+  try {
+    const payload = { name: forms.value.editUser.name, role: forms.value.editUser.role }
+    if (forms.value.editUser.password) {
+      payload.password = forms.value.editUser.password
+    }
+    await request(`/users/${forms.value.editUser.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+    setStatus('success', '用户信息已更新')
+    modals.value.userEdit = false
+    forms.value.editUser = { id: null, name: '', password: '', role: 'user' }
+    await fetchUsers()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deleteUser(userId) {
+  if (!confirm('确认删除该用户吗？')) return
+  try {
+    await request(`/users/${userId}`, { method: 'DELETE' })
+    setStatus('success', '用户已删除')
+    await Promise.all([fetchUsers(), fetchRoles()])
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
 async function handleStreamResponse(response, assistantIndex) {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -487,7 +633,8 @@ async function sendChat() {
         model_id: chatModelId.value,
         messages: payloadMessages,
         stream: true,
-        role_prompt: currentRolePrompt.value || undefined,
+        role_prompt: currentRolePrompt.value || defaultRolePrompt,
+        role_id: selectedRoleId.value,
       }),
     })
     if (!response.ok) {
@@ -603,11 +750,13 @@ onMounted(() => {
                 <h3>大模型聊天舱</h3>
               </div>
               <div class="header-actions">
-                <select v-model="chatRole" class="inline-input">
-                  <option v-for="preset in rolePresets" :key="preset.key" :value="preset.key">
-                    {{ preset.name }}
+                <select v-model="selectedRoleId" class="inline-input">
+                  <option v-for="prompt in rolePrompts" :key="prompt.id" :value="prompt.id">
+                    {{ prompt.name }}
                   </option>
+                  <option v-if="!rolePrompts.length" :value="null">默认提示词</option>
                 </select>
+                <button class="outline" v-if="isAdmin" @click="modals.rolePrompt = true">新增提示词</button>
                 <select v-model="chatModelId" class="inline-input" :disabled="!models.length">
                   <option v-for="model in models" :key="model.id" :value="model.id">{{ model.name }}</option>
                 </select>
@@ -646,11 +795,34 @@ onMounted(() => {
                   <div>
                     <p class="muted small">使用 Markdown 渲染，历史消息随请求自动附带。</p>
                     <p class="muted small">当前模型：{{ currentChatModel?.name || '未选择' }}</p>
-                    <p class="muted small">当前角色：{{ rolePresets.find((item) => item.key === chatRole)?.name }}</p>
+                    <p class="muted small">
+                      当前角色：{{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }}
+                    </p>
                   </div>
                   <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送星链' }}</button>
                 </div>
               </div>
+            </div>
+            <div class="table-wrapper" v-if="rolePrompts.length">
+              <table class="table compact">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>提示词</th>
+                    <th v-if="isAdmin">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in rolePrompts" :key="item.id">
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.prompt }}</td>
+                    <td v-if="isAdmin" class="row-actions">
+                      <button class="ghost" @click="openEditRolePrompt(item)">编辑</button>
+                      <button class="ghost danger" @click="deleteRolePrompt(item.id)">删除</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
         </section>
 
@@ -731,6 +903,10 @@ onMounted(() => {
                 <li><span>温度</span><strong>{{ selectedModel.temperature }}</strong></li>
                 <li><span>绑定用户</span><strong>{{ selectedModel.owner_id || '无' }}</strong></li>
               </ul>
+              <div class="row-actions" v-if="isAdmin">
+                <button class="ghost" @click="modals.modelEdit = true">编辑配置</button>
+                <button class="ghost danger" @click="deleteModel(selectedModel.id)">删除</button>
+              </div>
             </div>
           </div>
         </section>
@@ -840,6 +1016,8 @@ onMounted(() => {
                     <button class="ghost" @click="forms.balance.userId = user.id; updateBalance(user.id)">
                       调整余额
                     </button>
+                    <button class="ghost" @click="openEditUser(user)">编辑</button>
+                    <button class="ghost danger" @click="deleteUser(user.id)">删除</button>
                   </td>
                 </tr>
                 <tr v-if="!users.length">
@@ -932,6 +1110,25 @@ onMounted(() => {
         </div>
       </div>
 
+      <div v-if="modals.userEdit" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>编辑用户</h3>
+            <button class="icon" @click="modals.userEdit = false">×</button>
+          </div>
+          <label>用户名</label>
+          <input v-model="forms.editUser.name" placeholder="请输入用户名" />
+          <label>新密码（可选）</label>
+          <input v-model="forms.editUser.password" type="password" placeholder="不修改可留空" />
+          <label>角色</label>
+          <select v-model="forms.editUser.role">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+          <button @click="updateUser">保存</button>
+        </div>
+      </div>
+
       <div v-if="modals.model" class="modal-mask">
         <div class="modal">
           <div class="modal-header">
@@ -953,6 +1150,30 @@ onMounted(() => {
           <label>绑定用户 ID（可选）</label>
           <input v-model="forms.model.owner_id" placeholder="用户 ID" />
           <button @click="createModel">保存</button>
+        </div>
+      </div>
+
+      <div v-if="modals.modelEdit" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>编辑模型配置</h3>
+            <button class="icon" @click="modals.modelEdit = false">×</button>
+          </div>
+          <label>名称</label>
+          <input v-model="forms.editModel.name" placeholder="如：内部 GPT" />
+          <label>接口地址</label>
+          <input v-model="forms.editModel.base_url" placeholder="https://api.example.com" />
+          <label>模型名称</label>
+          <input v-model="forms.editModel.model_name" placeholder="gpt-4o" />
+          <label>密钥</label>
+          <input v-model="forms.editModel.api_key" placeholder="sk-xxxx" />
+          <label>最大 Token</label>
+          <input v-model.number="forms.editModel.max_tokens" type="number" placeholder="4096" />
+          <label>温度</label>
+          <input v-model.number="forms.editModel.temperature" type="number" step="0.1" placeholder="1" />
+          <label>绑定用户 ID（可选）</label>
+          <input v-model="forms.editModel.owner_id" placeholder="用户 ID" />
+          <button @click="updateModel">保存</button>
         </div>
       </div>
 
@@ -1010,6 +1231,34 @@ onMounted(() => {
           </select>
           <button @click="assignRole">更新角色</button>
           <p class="muted small">当前统计：管理员 {{ roleStats.admin || 0 }} / 普通 {{ roleStats.user || 0 }}</p>
+        </div>
+      </div>
+
+      <div v-if="modals.rolePrompt" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>新增提示词</h3>
+            <button class="icon" @click="modals.rolePrompt = false">×</button>
+          </div>
+          <label>名称</label>
+          <input v-model="forms.rolePrompt.name" placeholder="如：产品语气" />
+          <label>提示词</label>
+          <textarea v-model="forms.rolePrompt.prompt" rows="4" placeholder="输入系统提示词"></textarea>
+          <button @click="createRolePrompt">保存</button>
+        </div>
+      </div>
+
+      <div v-if="modals.rolePromptEdit" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>编辑提示词</h3>
+            <button class="icon" @click="modals.rolePromptEdit = false">×</button>
+          </div>
+          <label>名称</label>
+          <input v-model="forms.editRolePrompt.name" />
+          <label>提示词</label>
+          <textarea v-model="forms.editRolePrompt.prompt" rows="4"></textarea>
+          <button @click="updateRolePrompt">更新</button>
         </div>
       </div>
     </main>
