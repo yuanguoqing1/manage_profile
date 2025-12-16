@@ -188,15 +188,19 @@ class ChatCompletionRequest(SQLModel):
     messages: List[ChatMessage]
 
 
+from typing import Dict, Union
+
+UsageValue = Union[int, Dict[str, int]]
+
 class ChatCompletionResponse(SQLModel):
     """与 OpenAI 对齐的返回体"""
-
     id: str
     object: str
     created: int
     model: str
     choices: List[Dict[str, object]]
-    usage: Dict[str, int]
+    usage: Dict[str, UsageValue]
+
 
 
 class RoleUpdate(SQLModel):
