@@ -25,6 +25,7 @@ try:
 except ImportError:  # pragma: no cover - 在无依赖环境下自动降级
     redis = None  # type: ignore
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
@@ -186,6 +187,8 @@ class ChatCompletionRequest(SQLModel):
 
     model_id: Optional[int] = None
     messages: List[ChatMessage]
+    stream: bool = False
+    role_prompt: Optional[str] = None
 
 
 from typing import Dict, Union
@@ -563,12 +566,53 @@ def create_chat_completion(
         raise HTTPException(status_code=403, detail="无权使用该模型")
 
     target_url = f"{model.base_url.rstrip('/')}/v1/chat/completions"
+    system_prompts = [
+        {
+            "role": "system",
+            "content": f"当前用户昵称：{user.name}，角色：{user.role}。请在回答时体现礼貌、简洁并结合用户身份。",
+        }
+    ]
+    if payload.role_prompt:
+        system_prompts.append({"role": "system", "content": payload.role_prompt})
+
+    merged_messages = [*system_prompts, *[msg.model_dump() for msg in payload.messages]]
     request_body = {
         "model": model.model_name,
-        "messages": [msg.model_dump() for msg in payload.messages],
+        "messages": merged_messages,
         "max_tokens": model.max_tokens,
         "temperature": model.temperature,
     }
+    if payload.stream:
+        request_body["stream"] = True
+
+    if payload.stream:
+        def stream_response():
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    with client.stream(
+                        "POST",
+                        target_url,
+                        headers={"Authorization": f"Bearer {model.api_key}"},
+                        json=request_body,
+                    ) as upstream_response:
+                        if upstream_response.status_code >= 400:
+                            error_text = upstream_response.text
+                            try:
+                                error_body = upstream_response.json()
+                                error_text = error_body.get("error", {}).get("message", error_text)
+                            except ValueError:
+                                pass
+                            raise HTTPException(
+                                status_code=upstream_response.status_code,
+                                detail=f"上游错误：{error_text}",
+                            )
+                        for chunk in upstream_response.iter_text():
+                            if chunk:
+                                yield chunk
+            except httpx.RequestError as exc:  # pragma: no cover - 网络异常依赖外部环境
+                raise HTTPException(status_code=502, detail=f"请求上游模型失败：{exc}") from exc
+
+        return StreamingResponse(stream_response(), media_type="text/event-stream")
 
     try:
         with httpx.Client(timeout=30.0) as client:

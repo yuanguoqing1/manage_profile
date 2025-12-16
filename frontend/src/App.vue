@@ -29,6 +29,25 @@ const roleStats = ref({ admin: 0, user: 0 })
 const chatMessages = ref([])
 const chatInput = ref('')
 const chatModelId = ref(null)
+const chatRole = ref('general')
+
+const rolePresets = [
+  {
+    key: 'general',
+    name: '通用助手',
+    prompt: '你是一个耐心且高效的通用助手，请用简洁中文回答。',
+  },
+  {
+    key: 'engineer',
+    name: '工程专家',
+    prompt: '你是一名严谨的资深工程师，请给出可执行、分步骤的解决方案。',
+  },
+  {
+    key: 'pm',
+    name: '产品经理',
+    prompt: '你是一名产品经理，请以业务价值和用户体验为核心给出建议。',
+  },
+]
 
 const modals = ref({
   login: false,
@@ -62,6 +81,7 @@ const forms = ref({
 const isAuthed = computed(() => Boolean(token.value))
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const currentChatModel = computed(() => models.value.find((m) => m.id === chatModelId.value))
+const currentRolePrompt = computed(() => rolePresets.find((item) => item.key === chatRole.value)?.prompt || '')
 
 function setStatus(type, message) {
   status.value = { type, message }
@@ -408,6 +428,39 @@ async function assignRole() {
   }
 }
 
+async function handleStreamResponse(response, assistantIndex) {
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('浏览器暂不支持流式读取')
+  }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    const segments = buffer.split('\n\n')
+    buffer = segments.pop() || ''
+    for (const segment of segments) {
+      const line = segment.trim()
+      if (!line.startsWith('data:')) continue
+      const dataStr = line.replace(/^data:\s*/, '')
+      if (dataStr === '[DONE]') {
+        return
+      }
+      try {
+        const parsed = JSON.parse(dataStr)
+        const delta = parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.message?.content || ''
+        if (delta) {
+          chatMessages.value[assistantIndex].content += delta
+        }
+      } catch (err) {
+        console.warn('流式解析失败：', err)
+      }
+    }
+    if (done) break
+  }
+}
+
 async function sendChat() {
   if (!chatInput.value.trim()) {
     setStatus('error', '请输入提问内容')
@@ -421,18 +474,40 @@ async function sendChat() {
   const payloadMessages = [...chatMessages.value, { role: 'user', content: question }]
   chatLoading.value = true
   chatInput.value = ''
+  const userMessage = { role: 'user', content: question }
+  chatMessages.value.push(userMessage)
+  const assistantIndex = chatMessages.value.push({ role: 'assistant', content: 'AI 正在生成中…' }) - 1
   try {
-    const res = await request('/chat/completions', {
+    const headers = { 'Content-Type': 'application/json' }
+    if (token.value) headers.Authorization = `Bearer ${token.value}`
+    const response = await fetch(`${apiBase}/chat/completions`, {
       method: 'POST',
+      headers,
       body: JSON.stringify({
         model_id: chatModelId.value,
         messages: payloadMessages,
+        stream: true,
+        role_prompt: currentRolePrompt.value || undefined,
       }),
     })
-    const content = res?.choices?.[0]?.message?.content || '未获取到回复内容'
-    chatMessages.value.push({ role: 'user', content: question })
-    chatMessages.value.push({ role: 'assistant', content })
+    if (!response.ok) {
+      const errorText = response.status === 204 ? '请求失败' : await response.text()
+      throw new Error(errorText || '请求失败')
+    }
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('text/event-stream')) {
+      chatMessages.value[assistantIndex].content = ''
+      await handleStreamResponse(response, assistantIndex)
+      if (!chatMessages.value[assistantIndex].content) {
+        chatMessages.value[assistantIndex].content = '未获取到回复内容'
+      }
+    } else {
+      const res = await response.json()
+      const content = res?.choices?.[0]?.message?.content || '未获取到回复内容'
+      chatMessages.value[assistantIndex].content = content
+    }
   } catch (error) {
+    chatMessages.value[assistantIndex].content = `生成失败：${error.message}`
     chatInput.value = question
     setStatus('error', error.message)
   } finally {
@@ -522,51 +597,61 @@ onMounted(() => {
         <section v-if="loading" class="loading-banner">正在加载...</section>
 
         <section class="panel neon-panel" v-if="activeMenu === 'chat'">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">星际对话</p>
-              <h3>大模型聊天舱</h3>
-            </div>
-            <div class="header-actions">
-              <select v-model="chatModelId" class="inline-input" :disabled="!models.length">
-                <option v-for="model in models" :key="model.id" :value="model.id">{{ model.name }}</option>
-              </select>
-              <button class="outline" @click="resetChat">清空历史</button>
-            </div>
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">星际对话</p>
+                <h3>大模型聊天舱</h3>
+              </div>
+              <div class="header-actions">
+                <select v-model="chatRole" class="inline-input">
+                  <option v-for="preset in rolePresets" :key="preset.key" :value="preset.key">
+                    {{ preset.name }}
+                  </option>
+                </select>
+                <select v-model="chatModelId" class="inline-input" :disabled="!models.length">
+                  <option v-for="model in models" :key="model.id" :value="model.id">{{ model.name }}</option>
+                </select>
+                <button class="outline" @click="resetChat">清空历史</button>
+              </div>
           </div>
           <div class="chat-grid">
-            <div class="chat-log">
-              <div
-                v-for="(msg, index) in chatMessages"
-                :key="index"
-                class="chat-bubble"
+              <div class="chat-log">
+                <div
+                  v-for="(msg, index) in chatMessages"
+                  :key="index"
+                  class="chat-bubble"
                 :class="msg.role === 'assistant' ? 'assistant' : 'user'"
               >
                 <div class="bubble-meta">
                   <span class="role-tag">{{ msg.role === 'assistant' ? 'AI 导航' : '我' }}</span>
                   <button class="icon ghost" @click="deleteChatMessage(index)" title="删除这条记录">×</button>
                 </div>
-                <div class="bubble-body" v-html="renderMarkdown(msg.content)"></div>
+                  <div class="bubble-body" v-html="renderMarkdown(msg.content)"></div>
+                </div>
+                <div v-if="!chatMessages.length" class="empty muted">还没有对话记录，发送后会自动携带上下文。</div>
+                <div v-if="chatLoading" class="chat-loading-hint">
+                  <span class="spinner"></span>
+                  <span>AI 正在生成回答，请稍候...</span>
+                </div>
               </div>
-              <div v-if="!chatMessages.length" class="empty muted">还没有对话记录，发送后会自动携带上下文。</div>
-            </div>
-            <div class="chat-composer">
-              <textarea
-                v-model="chatInput"
+              <div class="chat-composer">
+                <textarea
+                  v-model="chatInput"
                 rows="5"
                 class="chat-input"
                 placeholder="描述你的任务、提问或贴上一段代码片段..."
                 @keyup.enter.exact.prevent="sendChat"
-              ></textarea>
-              <div class="composer-actions">
-                <div>
-                  <p class="muted small">使用 Markdown 渲染，历史消息随请求自动附带。</p>
-                  <p class="muted small">当前模型：{{ currentChatModel?.name || '未选择' }}</p>
+                ></textarea>
+                <div class="composer-actions">
+                  <div>
+                    <p class="muted small">使用 Markdown 渲染，历史消息随请求自动附带。</p>
+                    <p class="muted small">当前模型：{{ currentChatModel?.name || '未选择' }}</p>
+                    <p class="muted small">当前角色：{{ rolePresets.find((item) => item.key === chatRole)?.name }}</p>
+                  </div>
+                  <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送星链' }}</button>
                 </div>
-                <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送星链' }}</button>
               </div>
             </div>
-          </div>
         </section>
 
         <section class="panel-grid" v-if="activeMenu === 'home'">
