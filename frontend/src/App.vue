@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 const loading = ref(false)
+const chatLoading = ref(false)
 const status = ref({ type: '', message: '' })
 const activeMenu = ref('home')
 
@@ -25,6 +26,9 @@ const pages = ref([])
 const selectedCategory = ref(null)
 const logs = ref([])
 const roleStats = ref({ admin: 0, user: 0 })
+const chatMessages = ref([])
+const chatInput = ref('')
+const chatModelId = ref(null)
 
 const modals = ref({
   login: false,
@@ -57,6 +61,7 @@ const forms = ref({
 
 const isAuthed = computed(() => Boolean(token.value))
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
+const currentChatModel = computed(() => models.value.find((m) => m.id === chatModelId.value))
 
 function setStatus(type, message) {
   status.value = { type, message }
@@ -81,17 +86,62 @@ function clearAuth() {
   localStorage.removeItem('user')
 }
 
+function escapeHtml(input) {
+  return (input || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderMarkdown(content) {
+  const escaped = escapeHtml(content)
+  const withBlocks = escaped.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+  const withInline = withBlocks
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+  const paragraphs = withInline
+    .split(/\n{2,}/)
+    .map((part) => part.replace(/\n/g, '<br />'))
+    .join('</p><p>')
+  return `<p>${paragraphs}</p>`
+}
+
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
   if (token.value) {
     headers.Authorization = `Bearer ${token.value}`
   }
   const response = await fetch(`${apiBase}${path}`, { ...options, headers })
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({}))
-    throw new Error(detail.detail || '请求失败')
+  const rawText = response.status === 204 ? '' : await response.text()
+  let data = null
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText)
+    } catch (error) {
+      data = { detail: rawText }
+    }
   }
-  return response.status === 204 ? null : response.json()
+
+  if (response.status === 401) {
+    clearAuth()
+    models.value = []
+    users.value = []
+    categories.value = []
+    pages.value = []
+    logs.value = []
+    chatMessages.value = []
+    chatInput.value = ''
+    dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
+    throw new Error('登录已失效，请重新登录')
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.detail || data?.error || '请求失败')
+  }
+  return data
 }
 
 async function fetchDashboard() {
@@ -112,6 +162,9 @@ async function fetchModels() {
   if (selectedModel.value) {
     const refreshed = models.value.find((m) => m.id === selectedModel.value.id)
     selectedModel.value = refreshed || null
+  }
+  if (!chatModelId.value && models.value.length) {
+    chatModelId.value = models.value[0].id
   }
 }
 
@@ -208,6 +261,8 @@ async function handleLogout() {
   categories.value = []
   pages.value = []
   logs.value = []
+  chatMessages.value = []
+  chatInput.value = ''
   dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
 }
 
@@ -353,6 +408,47 @@ async function assignRole() {
   }
 }
 
+async function sendChat() {
+  if (!chatInput.value.trim()) {
+    setStatus('error', '请输入提问内容')
+    return
+  }
+  if (!models.value.length) {
+    setStatus('error', '请先配置可用模型')
+    return
+  }
+  const question = chatInput.value.trim()
+  const payloadMessages = [...chatMessages.value, { role: 'user', content: question }]
+  chatLoading.value = true
+  chatInput.value = ''
+  try {
+    const res = await request('/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({
+        model_id: chatModelId.value,
+        messages: payloadMessages,
+      }),
+    })
+    const content = res?.choices?.[0]?.message?.content || '未获取到回复内容'
+    chatMessages.value.push({ role: 'user', content: question })
+    chatMessages.value.push({ role: 'assistant', content })
+  } catch (error) {
+    chatInput.value = question
+    setStatus('error', error.message)
+  } finally {
+    chatLoading.value = false
+  }
+}
+
+function deleteChatMessage(index) {
+  chatMessages.value.splice(index, 1)
+}
+
+function resetChat() {
+  chatMessages.value = []
+  chatInput.value = ''
+}
+
 onMounted(() => {
   if (token.value) {
     syncAll()
@@ -372,6 +468,9 @@ onMounted(() => {
       </div>
       <nav class="menu">
         <button :class="{ active: activeMenu === 'home' }" @click="activeMenu = 'home'">首页</button>
+        <button :class="{ active: activeMenu === 'chat' }" @click="activeMenu = 'chat'" :disabled="!isAuthed">
+          星际聊天
+        </button>
         <button :class="{ active: activeMenu === 'models' }" @click="activeMenu = 'models'" :disabled="!isAuthed">
           大模型管理
         </button>
@@ -421,6 +520,54 @@ onMounted(() => {
 
       <template v-else>
         <section v-if="loading" class="loading-banner">正在加载...</section>
+
+        <section class="panel neon-panel" v-if="activeMenu === 'chat'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">星际对话</p>
+              <h3>大模型聊天舱</h3>
+            </div>
+            <div class="header-actions">
+              <select v-model="chatModelId" class="inline-input" :disabled="!models.length">
+                <option v-for="model in models" :key="model.id" :value="model.id">{{ model.name }}</option>
+              </select>
+              <button class="outline" @click="resetChat">清空历史</button>
+            </div>
+          </div>
+          <div class="chat-grid">
+            <div class="chat-log">
+              <div
+                v-for="(msg, index) in chatMessages"
+                :key="index"
+                class="chat-bubble"
+                :class="msg.role === 'assistant' ? 'assistant' : 'user'"
+              >
+                <div class="bubble-meta">
+                  <span class="role-tag">{{ msg.role === 'assistant' ? 'AI 导航' : '我' }}</span>
+                  <button class="icon ghost" @click="deleteChatMessage(index)" title="删除这条记录">×</button>
+                </div>
+                <div class="bubble-body" v-html="renderMarkdown(msg.content)"></div>
+              </div>
+              <div v-if="!chatMessages.length" class="empty muted">还没有对话记录，发送后会自动携带上下文。</div>
+            </div>
+            <div class="chat-composer">
+              <textarea
+                v-model="chatInput"
+                rows="5"
+                class="chat-input"
+                placeholder="描述你的任务、提问或贴上一段代码片段..."
+                @keyup.enter.exact.prevent="sendChat"
+              ></textarea>
+              <div class="composer-actions">
+                <div>
+                  <p class="muted small">使用 Markdown 渲染，历史消息随请求自动附带。</p>
+                  <p class="muted small">当前模型：{{ currentChatModel?.name || '未选择' }}</p>
+                </div>
+                <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送星链' }}</button>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section class="panel-grid" v-if="activeMenu === 'home'">
           <div class="panel stat">

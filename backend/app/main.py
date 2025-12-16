@@ -18,6 +18,8 @@ from pathlib import Path
 from enum import Enum
 from typing import Dict, List, Optional
 
+import httpx
+
 try:
     import redis
 except ImportError:  # pragma: no cover - 在无依赖环境下自动降级
@@ -170,6 +172,31 @@ class LoginRequest(SQLModel):
 class LoginResponse(SQLModel):
     token: str
     user: UserPublic
+
+
+class ChatMessage(SQLModel):
+    """聊天消息"""
+
+    role: str
+    content: str
+
+
+class ChatCompletionRequest(SQLModel):
+    """聊天请求参数"""
+
+    model_id: Optional[int] = None
+    messages: List[ChatMessage]
+
+
+class ChatCompletionResponse(SQLModel):
+    """与 OpenAI 对齐的返回体"""
+
+    id: str
+    object: str
+    created: int
+    model: str
+    choices: List[Dict[str, object]]
+    usage: Dict[str, int]
 
 
 class RoleUpdate(SQLModel):
@@ -513,6 +540,61 @@ def delete_model_config(
     session.commit()
     logging.info("删除大模型配置：%s", model.name)
     return None
+
+
+@app.post("/chat/completions", response_model=ChatCompletionResponse)
+def create_chat_completion(
+    payload: ChatCompletionRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    model: Optional[ModelConfig] = None
+    if payload.model_id:
+        model = session.get(ModelConfig, payload.model_id)
+    if not model:
+        model = session.exec(select(ModelConfig)).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="尚未配置可用模型")
+    if model.owner_id and user.role != Role.admin.value and user.id != model.owner_id:
+        raise HTTPException(status_code=403, detail="无权使用该模型")
+
+    target_url = f"{model.base_url.rstrip('/')}/v1/chat/completions"
+    request_body = {
+        "model": model.model_name,
+        "messages": [msg.model_dump() for msg in payload.messages],
+        "max_tokens": model.max_tokens,
+        "temperature": model.temperature,
+    }
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            upstream_response = client.post(
+                target_url,
+                headers={"Authorization": f"Bearer {model.api_key}"},
+                json=request_body,
+            )
+    except httpx.RequestError as exc:  # pragma: no cover - 网络异常依赖外部环境
+        raise HTTPException(status_code=502, detail=f"请求上游模型失败：{exc}") from exc
+
+    if upstream_response.status_code >= 400:
+        try:
+            error_body = upstream_response.json()
+            error_message = error_body.get("error", {}).get("message", upstream_response.text)
+        except ValueError:
+            error_message = upstream_response.text
+        raise HTTPException(status_code=upstream_response.status_code, detail=f"上游错误：{error_message}")
+
+    data = upstream_response.json()
+    now_ts = int(dt.datetime.now().timestamp())
+    data.setdefault("id", f"chatcmpl-{secrets.token_hex(6)}")
+    data.setdefault("object", "chat.completion")
+    data.setdefault("created", now_ts)
+    data.setdefault("model", model.model_name)
+    data.setdefault(
+        "usage",
+        {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    )
+    return data
 
 
 @app.post("/web/categories", response_model=WebCategoryPublic, status_code=status.HTTP_201_CREATED)
