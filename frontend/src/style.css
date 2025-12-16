@@ -117,6 +117,34 @@ body {
   letter-spacing: -0.2px;
 }
 
+.alert {
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.alert.success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.alert.error {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+
+.loading-banner {
+  background: linear-gradient(90deg, #e0f2fe, #eff6ff);
+  color: #0ea5e9;
+  border: 1px solid #bfdbfe;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 1.1px;
@@ -292,6 +320,10 @@ button.ghost.danger {
   border-bottom: 1px solid #e5e7eb;
   padding: 10px 8px;
   text-align: left;
+}
+
+.table tbody tr:hover {
+  background: #f8fafc;
 }
 
 .table th {
