@@ -19,7 +19,8 @@ class ApiKey(SQLModel, table=True):
 
 
 sqlite_url = "sqlite:///./data.db"
-engine = create_engine(sqlite_url, echo=False)
+# 使用 check_same_thread=False 允许多线程访问 SQLite，避免在并发请求时触发线程安全错误
+engine = create_engine(sqlite_url, echo=False, connect_args={"check_same_thread": False})
 
 
 app = FastAPI(title="Profile Manager", version="0.1.0")
