@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import logging
 import os
 import secrets
+from pathlib import Path
 from enum import Enum
 from typing import Dict, List, Optional
 
@@ -23,6 +25,14 @@ except ImportError:  # pragma: no cover - 在无依赖环境下自动降级
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+
+LOG_FILE = Path("app.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE, encoding="utf-8")],
+)
 
 
 class Role(str, Enum):
@@ -66,26 +76,88 @@ class BalanceUpdate(SQLModel):
     amount: float
 
 
-class ApiKey(SQLModel, table=True):
-    """API Key 表"""
+class ModelConfig(SQLModel, table=True):
+    """大模型配置表"""
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    label: str = Field(index=True)
-    key: str = Field(unique=True, index=True)
+    name: str = Field(index=True)
+    base_url: str
+    api_key: str
+    model_name: str
+    max_tokens: int = Field(default=4096, ge=1)
+    temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     owner_id: Optional[int] = Field(default=None, foreign_key="user.id")
 
 
-class ApiKeyCreate(SQLModel):
-    label: str
-    key: str
+class ModelConfigCreate(SQLModel):
+    name: str
+    base_url: str
+    api_key: str
+    model_name: str
+    max_tokens: int = 4096
+    temperature: float = 1.0
     owner_id: Optional[int] = None
 
 
-class ApiKeyPublic(SQLModel):
+class ModelConfigPublic(SQLModel):
     id: int
-    label: str
-    key: str
+    name: str
+    base_url: str
+    api_key: str
+    model_name: str
+    max_tokens: int
+    temperature: float
     owner_id: Optional[int]
+
+
+class WebCategory(SQLModel, table=True):
+    """网页分类"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    description: str = Field(default="")
+
+
+class WebPage(SQLModel, table=True):
+    """网页信息记录"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    category_id: int = Field(foreign_key="webcategory.id")
+    url: str
+    account: Optional[str] = Field(default=None)
+    password: Optional[str] = Field(default=None)
+    cookie: Optional[str] = Field(default=None)
+    note: Optional[str] = Field(default=None)
+
+
+class WebCategoryCreate(SQLModel):
+    name: str
+    description: str = ""
+
+
+class WebCategoryPublic(SQLModel):
+    id: int
+    name: str
+    description: str
+
+
+class WebPageCreate(SQLModel):
+    category_id: int
+    url: str
+    account: Optional[str] = None
+    password: Optional[str] = None
+    cookie: Optional[str] = None
+    note: Optional[str] = None
+
+
+class WebPagePublic(SQLModel):
+    id: int
+    category_id: int
+    url: str
+    account: Optional[str]
+    password: Optional[str]
+    cookie: Optional[str]
+    note: Optional[str]
 
 
 class LoginRequest(SQLModel):
@@ -359,41 +431,193 @@ def update_balance(
     return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
 
 
-@app.post("/apikeys", response_model=ApiKeyPublic, status_code=status.HTTP_201_CREATED)
-def create_key(key: ApiKeyCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    existing = session.exec(select(ApiKey).where(ApiKey.key == key.key)).first()
+@app.post("/models", response_model=ModelConfigPublic, status_code=status.HTTP_201_CREATED)
+def create_model_config(
+    key: ModelConfigCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    existing = session.exec(select(ModelConfig).where(ModelConfig.name == key.name)).first()
     if existing:
-        raise HTTPException(status_code=400, detail="API key already exists")
+        raise HTTPException(status_code=400, detail="模型配置名称已存在")
     if key.owner_id and not session.get(User, key.owner_id):
-        raise HTTPException(status_code=404, detail="Owner not found")
-    api_key = ApiKey(label=key.label, key=key.key, owner_id=key.owner_id)
-    session.add(api_key)
+        raise HTTPException(status_code=404, detail="绑定用户不存在")
+    model = ModelConfig(
+        name=key.name,
+        base_url=key.base_url,
+        api_key=key.api_key,
+        model_name=key.model_name,
+        max_tokens=key.max_tokens,
+        temperature=key.temperature,
+        owner_id=key.owner_id,
+    )
+    session.add(model)
     session.commit()
-    session.refresh(api_key)
-    return ApiKeyPublic(id=api_key.id, label=api_key.label, key=api_key.key, owner_id=api_key.owner_id)
+    session.refresh(model)
+    logging.info("新增大模型配置：%s", model.name)
+    return ModelConfigPublic(
+        id=model.id,
+        name=model.name,
+        base_url=model.base_url,
+        api_key=model.api_key,
+        model_name=model.model_name,
+        max_tokens=model.max_tokens,
+        temperature=model.temperature,
+        owner_id=model.owner_id,
+    )
 
 
-@app.get("/apikeys", response_model=List[ApiKeyPublic])
-def list_keys(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    keys = session.exec(select(ApiKey)).all()
-    return [ApiKeyPublic(id=k.id, label=k.label, key=k.key, owner_id=k.owner_id) for k in keys]
+@app.get("/models", response_model=List[ModelConfigPublic])
+def list_models(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
+    models = session.exec(select(ModelConfig)).all()
+    return [
+        ModelConfigPublic(
+            id=m.id,
+            name=m.name,
+            base_url=m.base_url,
+            api_key=m.api_key,
+            model_name=m.model_name,
+            max_tokens=m.max_tokens,
+            temperature=m.temperature,
+            owner_id=m.owner_id,
+        )
+        for m in models
+    ]
 
 
-@app.get("/apikeys/{key_id}", response_model=ApiKeyPublic)
-def get_key(key_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    key = session.get(ApiKey, key_id)
-    if not key:
-        raise HTTPException(status_code=404, detail="API key not found")
-    return ApiKeyPublic(id=key.id, label=key.label, key=key.key, owner_id=key.owner_id)
+@app.get("/models/{model_id}", response_model=ModelConfigPublic)
+def get_model_config(
+    model_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_user)
+):
+    model = session.get(ModelConfig, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型配置不存在")
+    return ModelConfigPublic(
+        id=model.id,
+        name=model.name,
+        base_url=model.base_url,
+        api_key=model.api_key,
+        model_name=model.model_name,
+        max_tokens=model.max_tokens,
+        temperature=model.temperature,
+        owner_id=model.owner_id,
+    )
 
 
-@app.delete("/apikeys/{key_id}", status_code=204)
-def delete_key(key_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    key = session.get(ApiKey, key_id)
-    if not key:
-        raise HTTPException(status_code=404, detail="API key not found")
-    session.delete(key)
+@app.delete("/models/{model_id}", status_code=204)
+def delete_model_config(
+    model_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    model = session.get(ModelConfig, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型配置不存在")
+    session.delete(model)
     session.commit()
+    logging.info("删除大模型配置：%s", model.name)
+    return None
+
+
+@app.post("/web/categories", response_model=WebCategoryPublic, status_code=status.HTTP_201_CREATED)
+def create_web_category(
+    payload: WebCategoryCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    existing = session.exec(select(WebCategory).where(WebCategory.name == payload.name)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="分类名称已存在")
+    category = WebCategory(name=payload.name, description=payload.description)
+    session.add(category)
+    session.commit()
+    session.refresh(category)
+    logging.info("新增网页分类：%s", category.name)
+    return WebCategoryPublic(id=category.id, name=category.name, description=category.description)
+
+
+@app.get("/web/categories", response_model=List[WebCategoryPublic])
+def list_web_categories(
+    session: Session = Depends(get_session), _: User = Depends(get_current_user)
+):
+    categories = session.exec(select(WebCategory)).all()
+    return [WebCategoryPublic(id=c.id, name=c.name, description=c.description) for c in categories]
+
+
+@app.delete("/web/categories/{category_id}", status_code=204)
+def delete_web_category(
+    category_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    category = session.get(WebCategory, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    pages = session.exec(select(WebPage).where(WebPage.category_id == category_id)).all()
+    for page in pages:
+        session.delete(page)
+    session.delete(category)
+    session.commit()
+    logging.info("删除网页分类：%s", category.name)
+    return None
+
+
+@app.post("/web/pages", response_model=WebPagePublic, status_code=status.HTTP_201_CREATED)
+def create_web_page(
+    payload: WebPageCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    category = session.get(WebCategory, payload.category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    page = WebPage(
+        category_id=payload.category_id,
+        url=payload.url,
+        account=payload.account,
+        password=payload.password,
+        cookie=payload.cookie,
+        note=payload.note,
+    )
+    session.add(page)
+    session.commit()
+    session.refresh(page)
+    logging.info("分类 %s 新增网页：%s", category.name, page.url)
+    return WebPagePublic(
+        id=page.id,
+        category_id=page.category_id,
+        url=page.url,
+        account=page.account,
+        password=page.password,
+        cookie=page.cookie,
+        note=page.note,
+    )
+
+
+@app.get("/web/pages", response_model=List[WebPagePublic])
+def list_web_pages(
+    category_id: Optional[int] = None,
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
+    query = select(WebPage)
+    if category_id:
+        query = query.where(WebPage.category_id == category_id)
+    pages = session.exec(query).all()
+    return [
+        WebPagePublic(
+            id=p.id,
+            category_id=p.category_id,
+            url=p.url,
+            account=p.account,
+            password=p.password,
+            cookie=p.cookie,
+            note=p.note,
+        )
+        for p in pages
+    ]
+
+
+@app.delete("/web/pages/{page_id}", status_code=204)
+def delete_web_page(
+    page_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    page = session.get(WebPage, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="网页记录不存在")
+    session.delete(page)
+    session.commit()
+    logging.info("删除网页：%s", page.url)
     return None
 
 
@@ -401,11 +625,11 @@ def delete_key(key_id: int, session: Session = Depends(get_session), _: User = D
 def summary(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
     users = session.exec(select(User)).all()
     total_balance = sum(user.balance for user in users)
-    keys = session.exec(select(ApiKey)).all()
+    models = session.exec(select(ModelConfig)).all()
     return {
         "user_count": len(users),
         "total_balance": total_balance,
-        "api_key_count": len(keys),
+        "model_count": len(models),
     }
 
 
@@ -416,6 +640,18 @@ def list_roles(session: Session = Depends(get_session), _: User = Depends(requir
     for u in users:
         stats[u.role] = stats.get(u.role, 0) + 1
     return {"roles": stats}
+
+
+def read_logs(max_lines: int = 200) -> List[str]:
+    if not LOG_FILE.exists():
+        return []
+    lines = LOG_FILE.read_text(encoding="utf-8").splitlines()
+    return lines[-max_lines:]
+
+
+@app.get("/logs")
+def get_logs(limit: int = 200, _: User = Depends(require_admin)):
+    return {"lines": read_logs(max_lines=max(10, min(limit, 1000)))}
 
 
 @app.post("/roles/assign")
