@@ -529,6 +529,33 @@ label {
   color: #cbd5f5;
 }
 
+.chat-loading-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(79, 70, 229, 0.12);
+  border: 1px dashed rgba(99, 102, 241, 0.35);
+  color: #cbd5f5;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  display: inline-block;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .chat-composer {
   display: grid;
   gap: 10px;
