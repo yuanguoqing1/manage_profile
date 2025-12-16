@@ -181,6 +181,7 @@ class ChatCompletionRequest(SQLModel):
     messages: List[ChatMessage]
     stream: bool = False
     role_prompt: Optional[str] = None
+    role_id: Optional[int] = None
 
 
 from typing import Dict, Union
@@ -195,6 +196,54 @@ class ChatCompletionResponse(SQLModel):
     model: str
     choices: List[Dict[str, object]]
     usage: Dict[str, UsageValue]
+
+
+class UserUpdate(SQLModel):
+    """用户信息更新入参"""
+
+    name: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[Role] = None
+
+
+class ModelConfigUpdate(SQLModel):
+    """大模型配置更新入参"""
+
+    name: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model_name: Optional[str] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    owner_id: Optional[int] = None
+
+
+class RolePrompt(SQLModel, table=True):
+    """提示词角色表"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    prompt: str
+
+
+class RolePromptCreate(SQLModel):
+    """新增提示词入参"""
+
+    name: str
+    prompt: str
+
+
+class RolePromptUpdate(SQLModel):
+    """更新提示词入参"""
+
+    name: Optional[str] = None
+    prompt: Optional[str] = None
+
+
+class RolePromptPublic(SQLModel):
+    id: int
+    name: str
+    prompt: str
 
 
 
@@ -437,6 +486,49 @@ def get_user(user_id: int, session: Session = Depends(get_session), _: User = De
     return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
 
 
+@app.put("/users/{user_id}", response_model=UserPublic)
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    session: Session = Depends(get_session),
+    _: User = Depends(require_admin),
+):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.name and payload.name != user.name:
+        exists = session.exec(select(User).where(User.name == payload.name)).first()
+        if exists:
+            raise HTTPException(status_code=400, detail="用户名已存在")
+        user.name = payload.name
+
+    if payload.password is not None:
+        if not payload.password.strip():
+            raise HTTPException(status_code=400, detail="密码不能为空")
+        user.salt = secrets.token_hex(8)
+        user.password_hash = hash_password(payload.password, user.salt)
+
+    if payload.role:
+        user.role = payload.role.value
+
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
+
+
+@app.delete("/users/{user_id}", status_code=204)
+def delete_user(user_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    session.delete(user)
+    session.commit()
+    logging.info("删除用户：%s", user.name)
+    return None
+
+
 @app.put("/users/{user_id}/balance", response_model=UserPublic)
 def update_balance(
     user_id: int,
@@ -528,6 +620,55 @@ def get_model_config(
     )
 
 
+@app.put("/models/{model_id}", response_model=ModelConfigPublic)
+def update_model_config(
+    model_id: int,
+    payload: ModelConfigUpdate,
+    session: Session = Depends(get_session),
+    _: User = Depends(require_admin),
+):
+    model = session.get(ModelConfig, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="模型配置不存在")
+
+    if payload.name and payload.name != model.name:
+        existing = session.exec(select(ModelConfig).where(ModelConfig.name == payload.name)).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="模型配置名称已存在")
+        model.name = payload.name
+
+    if payload.owner_id and not session.get(User, payload.owner_id):
+        raise HTTPException(status_code=404, detail="绑定用户不存在")
+
+    if payload.base_url is not None:
+        model.base_url = payload.base_url
+    if payload.api_key is not None:
+        model.api_key = payload.api_key
+    if payload.model_name is not None:
+        model.model_name = payload.model_name
+    if payload.max_tokens is not None:
+        model.max_tokens = payload.max_tokens
+    if payload.temperature is not None:
+        model.temperature = payload.temperature
+    if payload.owner_id is not None:
+        model.owner_id = payload.owner_id
+
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+    logging.info("更新大模型配置：%s", model.name)
+    return ModelConfigPublic(
+        id=model.id,
+        name=model.name,
+        base_url=model.base_url,
+        api_key=model.api_key,
+        model_name=model.model_name,
+        max_tokens=model.max_tokens,
+        temperature=model.temperature,
+        owner_id=model.owner_id,
+    )
+
+
 @app.delete("/models/{model_id}", status_code=204)
 def delete_model_config(
     model_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
@@ -564,8 +705,20 @@ def create_chat_completion(
             "content": f"当前用户昵称：{user.name}，角色：{user.role}。请在回答时体现礼貌、简洁并结合用户身份。",
         }
     ]
-    if payload.role_prompt:
-        system_prompts.append({"role": "system", "content": payload.role_prompt})
+
+    role_prompt_text = payload.role_prompt
+    if payload.role_id:
+        prompt_record = session.get(RolePrompt, payload.role_id)
+        if not prompt_record:
+            raise HTTPException(status_code=404, detail="提示词不存在")
+        role_prompt_text = prompt_record.prompt
+    if not role_prompt_text:
+        fallback_prompt = session.exec(select(RolePrompt).order_by(RolePrompt.id)).first()
+        if fallback_prompt:
+            role_prompt_text = fallback_prompt.prompt
+
+    if role_prompt_text:
+        system_prompts.append({"role": "system", "content": role_prompt_text})
 
     merged_messages = [*system_prompts, *[msg.model_dump() for msg in payload.messages]]
     request_body = {
@@ -762,6 +915,66 @@ def list_roles(session: Session = Depends(get_session), _: User = Depends(requir
     for u in users:
         stats[u.role] = stats.get(u.role, 0) + 1
     return {"roles": stats}
+
+
+@app.get("/role-prompts", response_model=List[RolePromptPublic])
+def list_role_prompts(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
+    prompts = session.exec(select(RolePrompt).order_by(RolePrompt.id)).all()
+    return [RolePromptPublic(id=p.id, name=p.name, prompt=p.prompt) for p in prompts]
+
+
+@app.post("/role-prompts", response_model=RolePromptPublic, status_code=status.HTTP_201_CREATED)
+def create_role_prompt(
+    payload: RolePromptCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    existing = session.exec(select(RolePrompt).where(RolePrompt.name == payload.name)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="提示词名称已存在")
+    record = RolePrompt(name=payload.name, prompt=payload.prompt)
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    logging.info("新增提示词角色：%s", record.name)
+    return RolePromptPublic(id=record.id, name=record.name, prompt=record.prompt)
+
+
+@app.put("/role-prompts/{prompt_id}", response_model=RolePromptPublic)
+def update_role_prompt(
+    prompt_id: int,
+    payload: RolePromptUpdate,
+    session: Session = Depends(get_session),
+    _: User = Depends(require_admin),
+):
+    record = session.get(RolePrompt, prompt_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="提示词不存在")
+
+    if payload.name and payload.name != record.name:
+        exists = session.exec(select(RolePrompt).where(RolePrompt.name == payload.name)).first()
+        if exists:
+            raise HTTPException(status_code=400, detail="提示词名称已存在")
+        record.name = payload.name
+    if payload.prompt is not None:
+        record.prompt = payload.prompt
+
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    logging.info("更新提示词角色：%s", record.name)
+    return RolePromptPublic(id=record.id, name=record.name, prompt=record.prompt)
+
+
+@app.delete("/role-prompts/{prompt_id}", status_code=204)
+def delete_role_prompt(
+    prompt_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
+):
+    record = session.get(RolePrompt, prompt_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="提示词不存在")
+    session.delete(record)
+    session.commit()
+    logging.info("删除提示词角色：%s", record.name)
+    return None
 
 
 def read_logs(max_lines: int = 200) -> List[str]:
