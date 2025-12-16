@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 
-const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+const apiBase = import.meta.env.VITE_API_BASE || 'http://10.30.79.140:8001'
 
 const loading = ref(false)
 const chatLoading = ref(false)
