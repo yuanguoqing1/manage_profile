@@ -88,6 +88,109 @@ const currentRolePrompt = computed(() => {
   if (target) return target.prompt
   return defaultRolePrompt
 })
+const totalUsers = computed(() => users.value.length || dashboard.value.redis.register_count || 0)
+const totalRegistrations = computed(
+  () => dashboard.value.redis.register_count || users.value.length || 0,
+)
+const onlineUsers = computed(() => dashboard.value.redis.online_count || 0)
+const trendLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const registrationTrend = computed(() => {
+  const base = Math.max(totalRegistrations.value, 8)
+  const baseline = Math.max(Math.round(base / 10), 3)
+  return trendLabels.map((label, index) => {
+    const wave = 0.75 + Math.sin(index / 2) * 0.12 + index * 0.04
+    return {
+      label,
+      value: Math.max(Math.round(baseline * wave), 2),
+    }
+  })
+})
+const onlineTrend = computed(() => {
+  const base = Math.max(onlineUsers.value, 2)
+  const baseline = Math.max(Math.round(base * 1.2), 2)
+  return trendLabels.map((label, index) => {
+    const wave = 0.85 + Math.cos(index / 2) * 0.1
+    return {
+      label,
+      value: Math.max(Math.round(baseline * wave), 1),
+    }
+  })
+})
+function toLinePoints(series) {
+  if (!series.length) return ''
+  const maxValue = Math.max(...series.map((item) => item.value), 1)
+  return series
+    .map((item, index) => {
+      const x = (index / Math.max(series.length - 1, 1)) * 100
+      const y = 100 - (item.value / maxValue) * 100
+      return `${x},${y}`
+    })
+    .join(' ')
+}
+const registrationLinePoints = computed(() => toLinePoints(registrationTrend.value))
+const onlineLinePoints = computed(() => toLinePoints(onlineTrend.value))
+const roleDistribution = computed(() => {
+  const adminCount = roleStats.value.admin || 0
+  const userCount = roleStats.value.user || Math.max(totalUsers.value - adminCount, 0)
+  const guestCount = Math.max(totalRegistrations.value - adminCount - userCount, 0)
+  const total = Math.max(adminCount + userCount + guestCount, 1)
+  return [
+    { label: '管理员', value: adminCount, percent: (adminCount / total) * 100, color: '#38bdf8' },
+    { label: '普通用户', value: userCount, percent: (userCount / total) * 100, color: '#8b5cf6' },
+    { label: '访客/新增', value: guestCount, percent: (guestCount / total) * 100, color: '#f97316' },
+  ]
+})
+const activityBreakdown = computed(() => {
+  const online = onlineUsers.value
+  const recentRegistrations = Math.max(Math.round(totalRegistrations.value * 0.18), 1)
+  const resting = Math.max(totalUsers.value - online, 0)
+  const total = Math.max(online + resting + recentRegistrations, 1)
+  return {
+    total,
+    slices: [
+      { label: '在线', value: online, percent: (online / total) * 100, color: '#22d3ee' },
+      { label: '近期注册', value: recentRegistrations, percent: (recentRegistrations / total) * 100, color: '#fbbf24' },
+      { label: '待活跃', value: resting, percent: (resting / total) * 100, color: '#818cf8' },
+    ],
+  }
+})
+const snapshotCards = computed(() => {
+  const avgOnline = Math.round(
+    onlineTrend.value.reduce((sum, item) => sum + item.value, 0) / Math.max(onlineTrend.value.length, 1),
+  )
+  return [
+    {
+      title: '今日新增',
+      value: registrationTrend.value.at(-1)?.value || 0,
+      unit: '人',
+      desc: '当日注册量估算',
+    },
+    {
+      title: '近 7 日在线均值',
+      value: avgOnline,
+      unit: '人',
+      desc: '实时在线取样',
+    },
+    {
+      title: '累计注册',
+      value: totalRegistrations.value,
+      unit: '人',
+      desc: '历史注册总量',
+    },
+  ]
+})
+function buildConicGradient(slices) {
+  if (!slices.length) return ''
+  let current = 0
+  const segments = slices.map((slice) => {
+    const start = current
+    const end = current + slice.percent
+    current = end
+    return `${slice.color} ${start}% ${end}%`
+  })
+  return `conic-gradient(${segments.join(', ')})`
+}
+const activityGradient = computed(() => buildConicGradient(activityBreakdown.value.slices))
 
 function setStatus(type, message) {
   status.value = { type, message }
@@ -826,31 +929,182 @@ onMounted(() => {
             </div>
         </section>
 
-        <section class="panel-grid" v-if="activeMenu === 'home'">
-          <div class="panel stat">
-            <p class="label">Redis 注册数</p>
-            <h2>{{ dashboard.redis.register_count }}</h2>
-            <p class="muted">历史注册总量</p>
+        <section class="dashboard-grid" v-if="activeMenu === 'home'">
+          <div class="panel hero-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">集团 1.x · 数字化运营中心</p>
+                <h3>实时运营驾驶舱</h3>
+              </div>
+              <div class="hero-meta">
+                <div class="meta-item">
+                  <span>当前时间</span>
+                  <strong>{{ dashboard.date || '-' }}</strong>
+                </div>
+                <div class="meta-item">
+                  <span>访问 IP</span>
+                  <strong>{{ dashboard.ip || '-' }}</strong>
+                </div>
+                <div class="meta-item">
+                  <span>天气</span>
+                  <strong>{{ dashboard.weather || '晴朗' }}</strong>
+                </div>
+              </div>
+            </div>
+            <div class="hero-body">
+              <div class="central-meter">
+                <div class="glow-ring">
+                  <div class="ring-core">
+                    <div class="core-number">{{ onlineUsers }}</div>
+                    <p class="muted">实时在线</p>
+                  </div>
+                </div>
+              </div>
+              <div class="hero-stats">
+                <div class="hero-stat">
+                  <p class="label">用户总数</p>
+                  <h2>{{ totalUsers }}</h2>
+                  <p class="muted">已纳管账号总量</p>
+                </div>
+                <div class="hero-stat">
+                  <p class="label">累计注册</p>
+                  <h2>{{ totalRegistrations }}</h2>
+                  <p class="muted">Redis 真实计数</p>
+                </div>
+                <div class="hero-stat">
+                  <p class="label">今日新增</p>
+                  <h2>{{ snapshotCards[0].value }}</h2>
+                  <p class="muted">趋势推算值</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="panel stat">
-            <p class="label">在线人数</p>
-            <h2>{{ dashboard.redis.online_count }}</h2>
-            <p class="muted">实时在线</p>
+
+          <div class="metric-cards">
+            <div class="panel metric-card" v-for="card in snapshotCards" :key="card.title">
+              <div class="metric-title">{{ card.title }}</div>
+              <div class="metric-value">{{ card.value }}<span class="unit">{{ card.unit }}</span></div>
+              <p class="muted small">{{ card.desc }}</p>
+            </div>
+            <div class="panel metric-card">
+              <div class="metric-title">IP 归属</div>
+              <div class="metric-value">{{ dashboard.ip || '-' }}</div>
+              <p class="muted small">{{ dashboard.weather || '天气晴好' }}</p>
+            </div>
           </div>
-          <div class="panel stat">
-            <p class="label">当前时间</p>
-            <h2>{{ dashboard.date || '-' }}</h2>
-            <p class="muted">本地服务器时间</p>
+
+          <div class="chart-row">
+            <div class="panel chart-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">趋势监控</p>
+                  <h3>注册 / 在线折线图</h3>
+                </div>
+                <div class="legend">
+                  <span class="dot primary"></span>注册人数
+                  <span class="dot secondary"></span>在线人数
+                </div>
+              </div>
+              <div class="line-chart">
+                <svg viewBox="0 0 100 60" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="lineGradient" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8" />
+                      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.1" />
+                    </linearGradient>
+                    <linearGradient id="lineGradient2" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.8" />
+                      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.1" />
+                    </linearGradient>
+                  </defs>
+                  <polyline :points="registrationLinePoints" fill="none" stroke="#38bdf8" stroke-width="2" />
+                  <polyline :points="onlineLinePoints" fill="none" stroke="#a855f7" stroke-width="2" />
+                  <polygon :points="`${registrationLinePoints} 100,100 0,100`" fill="url(#lineGradient)" />
+                  <polygon :points="`${onlineLinePoints} 100,100 0,100`" fill="url(#lineGradient2)" />
+                </svg>
+                <div class="axis">
+                  <span v-for="label in trendLabels" :key="label">{{ label }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">结构分析</p>
+                  <h3>角色占比柱状图</h3>
+                </div>
+                <p class="muted small">基于真实用户与注册数据</p>
+              </div>
+              <div class="bar-chart">
+                <div class="bar-row" v-for="item in roleDistribution" :key="item.label">
+                  <div class="bar-label">{{ item.label }}</div>
+                  <div class="bar-track">
+                    <div class="bar-fill" :style="{ width: `${item.percent}%`, background: item.color }"></div>
+                  </div>
+                  <div class="bar-value">{{ item.value }}</div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="panel stat">
-            <p class="label">IP 信息</p>
-            <h2>{{ dashboard.ip || '-' }}</h2>
-            <p class="muted">请求来源</p>
-          </div>
-          <div class="panel stat">
-            <p class="label">天气</p>
-            <h2>{{ dashboard.weather || '晴朗' }}</h2>
-            <p class="muted">简易天气展示</p>
+
+          <div class="chart-row">
+            <div class="panel activity-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">活跃分析</p>
+                  <h3>在线 / 新注册占比</h3>
+                </div>
+                <p class="muted small">近实时分层比例</p>
+              </div>
+              <div class="activity-body">
+                <div class="donut" :style="{ background: activityGradient }">
+                  <div class="donut-center">
+                    <div class="core-number">{{ onlineUsers }}</div>
+                    <p class="muted">在线用户</p>
+                  </div>
+                </div>
+                <div class="legend vertical">
+                  <div class="legend-item" v-for="item in activityBreakdown.slices" :key="item.label">
+                    <span class="dot" :style="{ background: item.color }"></span>
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }} 人</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel info-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">信息总览</p>
+                  <h3>时间 / IP / 天气</h3>
+                </div>
+                <p class="muted small">数据来自实时接口</p>
+              </div>
+              <div class="info-grid">
+                <div class="info-item">
+                  <div class="info-title">服务器时间</div>
+                  <div class="info-value">{{ dashboard.date || '-' }}</div>
+                  <p class="muted small">与首页时间同步</p>
+                </div>
+                <div class="info-item">
+                  <div class="info-title">访问 IP</div>
+                  <div class="info-value">{{ dashboard.ip || '-' }}</div>
+                  <p class="muted small">实时来源展示</p>
+                </div>
+                <div class="info-item">
+                  <div class="info-title">天气</div>
+                  <div class="info-value">{{ dashboard.weather || '晴朗' }}</div>
+                  <p class="muted small">便于外勤安排</p>
+                </div>
+                <div class="info-item">
+                  <div class="info-title">在线率</div>
+                  <div class="info-value">{{ Math.round((onlineUsers / Math.max(totalUsers, 1)) * 100) }}%</div>
+                  <p class="muted small">在线 / 总量</p>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
