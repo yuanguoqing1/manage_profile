@@ -536,11 +536,22 @@ class ConnectionManager:
 ws_manager = ConnectionManager()
 
 
+def _get_allowed_origins() -> List[str]:
+    env_value = os.getenv("ALLOWED_ORIGINS", "")
+    if env_value:
+        return [origin.strip() for origin in env_value.split(",") if origin.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://10.30.79.140:5173",
+    ]
+
+
 app = FastAPI(title="Profile Manager", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
