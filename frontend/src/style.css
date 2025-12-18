@@ -302,6 +302,11 @@ button.danger {
   margin-left: 8px;
 }
 
+.tag.success {
+  background: rgba(34, 197, 94, 0.16);
+  color: #bbf7d0;
+}
+
 .panel .header-actions {
   display: flex;
   gap: 8px;
@@ -540,6 +545,121 @@ label {
 
 .wechat-chat {
   margin-top: 12px;
+}
+
+.peer-chat {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.peer-list {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.peer-list-header {
+  display: grid;
+  gap: 8px;
+}
+
+.peer-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.peer-item {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  color: #e5edff;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.peer-item:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.peer-item.active {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(59, 130, 246, 0.16));
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.peer-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: #0b122d;
+  background: linear-gradient(135deg, #22d3ee, #2563eb);
+  position: relative;
+}
+
+.peer-avatar::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #9ca3af;
+  border: 2px solid #0b122d;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.16);
+}
+
+.peer-avatar[data-online='true']::after {
+  background: #34d399;
+}
+
+.peer-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.peer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.peer-conversation {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.peer-body {
+  min-height: 360px;
+}
+
+.peer-composer .wechat-input {
+  min-height: 120px;
 }
 
 .wechat-window {
