@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import datetime as dt
@@ -8,7 +7,7 @@ import os
 import secrets
 from pathlib import Path
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union, Set
 
 import httpx
 
@@ -16,7 +15,17 @@ try:
     import redis
 except ImportError:  # pragma: no cover - 在无依赖环境下自动降级
     redis = None  # type: ignore
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    status,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from datetime import datetime
 
 from fastapi.responses import StreamingResponse
@@ -211,12 +220,12 @@ class ChatCompletionRequest(SQLModel):
     role_id: Optional[int] = None
 
 
-from typing import Dict, Union
-
 UsageValue = Union[int, Dict[str, int]]
+
 
 class ChatCompletionResponse(SQLModel):
     """与 OpenAI 对齐的返回体"""
+
     id: str
     object: str
     created: int
@@ -292,7 +301,6 @@ class RolePromptPublic(SQLModel):
     prompt: str
 
 
-
 class RoleUpdate(SQLModel):
     """角色赋予入参"""
 
@@ -303,6 +311,7 @@ class RoleUpdate(SQLModel):
 sqlite_url = "sqlite:///./data.db"
 engine = create_engine(sqlite_url, echo=False, connect_args={"check_same_thread": False})
 
+# 注意：内存态 token_store，多 worker 会失效（必须单进程/单 worker）
 token_store: Dict[str, Dict[str, int]] = {}
 
 
@@ -318,14 +327,10 @@ def ensure_columns() -> None:
     }
     with engine.begin() as conn:
         for table, columns in required_columns.items():
-            existing = {
-                row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info(\"{table}\")").all()
-            }
+            existing = {row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table}")').all()}
             for column, sql_type in columns.items():
                 if column not in existing:
-                    conn.exec_driver_sql(
-                        f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"  # noqa: S608
-                    )
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")  # noqa: S608
 
 
 def create_db_and_tables() -> None:
@@ -338,7 +343,7 @@ def get_session():
         yield session
 
 
-def init_redis() -> Optional[redis.Redis]:
+def init_redis() -> Optional["redis.Redis"]:
     """初始化 Redis 客户端，失败时返回 None。"""
 
     if redis is None:
@@ -401,6 +406,49 @@ def get_register_count() -> int:
     return int(fallback_counters["register"])
 
 
+# -----------------------------
+# WebSocket 连接管理（新增）
+# -----------------------------
+class ConnectionManager:
+    """管理用户 WebSocket 连接（同一用户允许多个连接，例如多标签页）。"""
+
+    def __init__(self) -> None:
+        self._connections: Dict[int, Set[WebSocket]] = {}
+
+    async def connect(self, user_id: int, ws: WebSocket) -> None:
+        await ws.accept()
+        self._connections.setdefault(user_id, set()).add(ws)
+        logging.info("WS connect user_id=%s connections=%s", user_id, len(self._connections[user_id]))
+
+    def disconnect(self, user_id: int, ws: WebSocket) -> None:
+        conns = self._connections.get(user_id)
+        if not conns:
+            return
+        conns.discard(ws)
+        if not conns:
+            self._connections.pop(user_id, None)
+        logging.info("WS disconnect user_id=%s remain=%s", user_id, len(self._connections.get(user_id, [])))
+
+    async def send_to(self, user_id: int, payload: dict) -> None:
+        conns = list(self._connections.get(user_id, set()))
+        if not conns:
+            return
+        dead: List[WebSocket] = []
+        for ws in conns:
+            try:
+                await ws.send_json(payload)
+            except Exception:  # noqa: BLE001
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(user_id, ws)
+
+    def is_ws_online(self, user_id: int) -> bool:
+        return user_id in self._connections and len(self._connections[user_id]) > 0
+
+
+ws_manager = ConnectionManager()
+
+
 app = FastAPI(title="Profile Manager", version="0.2.0")
 
 app.add_middleware(
@@ -441,6 +489,48 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != Role.admin.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
     return user
+
+
+def get_user_by_token(token: str, session: Session) -> User:
+    record = token_store.get(token)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已失效")
+    user = session.get(User, record["user_id"])
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+    return user
+
+
+# -----------------------------
+# WebSocket 路由（新增）
+# -----------------------------
+@app.websocket("/ws")
+async def ws_endpoint(ws: WebSocket):
+    token = ws.query_params.get("token")
+    if not token:
+        await ws.close(code=1008)
+        return
+
+    with Session(engine) as session:
+        try:
+            user = get_user_by_token(token, session)
+        except HTTPException:
+            await ws.close(code=1008)
+            return
+
+        await ws_manager.connect(user.id, ws)
+        try:
+            while True:
+                # 客户端可以发 ping 文本，服务端只保持连接即可
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            ws_manager.disconnect(user.id, ws)
+        except Exception:  # noqa: BLE001
+            ws_manager.disconnect(user.id, ws)
+            try:
+                await ws.close(code=1011)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 @app.post("/auth/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
@@ -484,9 +574,7 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)):
 
 
 @app.post("/auth/logout")
-def logout(
-    authorization: str = Header(default=None), user: User = Depends(get_current_user)
-):
+def logout(authorization: str = Header(default=None), user: User = Depends(get_current_user)):
     token = authorization.split()[1]
     token_store.pop(token, None)
     logout_user_online(token)
@@ -508,9 +596,7 @@ def create_user(user_in: UserCreate, session: Session = Depends(get_session), _:
     role_value = user_in.role.value if user_in.role else Role.user.value
     salt = secrets.token_hex(8)
     password_hash = hash_password(user_in.password, salt)
-    user = User(
-        name=user_in.name, balance=0.0, password_hash=password_hash, salt=salt, role=role_value
-    )
+    user = User(name=user_in.name, balance=0.0, password_hash=password_hash, salt=salt, role=role_value)
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -526,8 +612,9 @@ def list_users(session: Session = Depends(get_session), _: User = Depends(requir
 
 @app.get("/contacts", response_model=List[UserContactStatusPublic])
 def list_contacts(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    """获取站内互聊联系人列表，排除当前用户。"""
-
+    """获取站内互聊联系人列表，排除当前用户。
+    在线状态：token_store（登录态） + ws 连接（更实时）
+    """
     online_user_ids = {info.get("user_id") for info in token_store.values() if info.get("user_id")}
     contacts = session.exec(select(User).where(User.id != user.id)).all()
     return [
@@ -535,7 +622,7 @@ def list_contacts(session: Session = Depends(get_session), user: User = Depends(
             id=item.id,
             name=item.name,
             role=item.role,
-            is_online=item.id in online_user_ids,
+            is_online=(item.id in online_user_ids) or ws_manager.is_ws_online(item.id),
         )
         for item in contacts
     ]
@@ -593,9 +680,7 @@ def delete_user(user_id: int, session: Session = Depends(get_session), _: User =
 
 
 @app.get("/contacts/messages/{peer_id}", response_model=List[PeerMessagePublic])
-def get_peer_messages(
-    peer_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)
-):
+def get_peer_messages(peer_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     peer = session.get(User, peer_id)
     if not peer:
         raise HTTPException(status_code=404, detail="联系人不存在")
@@ -625,8 +710,9 @@ def get_peer_messages(
     ]
 
 
+# 改为 async：落库后 WS 推送（关键）
 @app.post("/contacts/messages", response_model=PeerMessagePublic, status_code=status.HTTP_201_CREATED)
-def create_peer_message(
+async def create_peer_message(
     payload: PeerMessageCreate,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
@@ -645,7 +731,8 @@ def create_peer_message(
     session.add(message)
     session.commit()
     session.refresh(message)
-    return PeerMessagePublic(
+
+    public_msg = PeerMessagePublic(
         id=message.id,
         sender_id=message.sender_id,
         receiver_id=message.receiver_id,
@@ -655,14 +742,18 @@ def create_peer_message(
         created_at=message.created_at,
     )
 
+    payload_ws = {"type": "peer_message", "data": public_msg.model_dump()}
+
+    # 推送给接收方（实时收到）
+    await ws_manager.send_to(receiver.id, payload_ws)
+    # 也推给发送方（其他标签页/设备同步显示）
+    await ws_manager.send_to(user.id, payload_ws)
+
+    return public_msg
+
 
 @app.put("/users/{user_id}/balance", response_model=UserPublic)
-def update_balance(
-    user_id: int,
-    update: BalanceUpdate,
-    session: Session = Depends(get_session),
-    _: User = Depends(require_admin),
-):
+def update_balance(user_id: int, update: BalanceUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -677,9 +768,7 @@ def update_balance(
 
 
 @app.post("/models", response_model=ModelConfigPublic, status_code=status.HTTP_201_CREATED)
-def create_model_config(
-    key: ModelConfigCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def create_model_config(key: ModelConfigCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     existing = session.exec(select(ModelConfig).where(ModelConfig.name == key.name)).first()
     if existing:
         raise HTTPException(status_code=400, detail="模型配置名称已存在")
@@ -729,9 +818,7 @@ def list_models(session: Session = Depends(get_session), _: User = Depends(get_c
 
 
 @app.get("/models/{model_id}", response_model=ModelConfigPublic)
-def get_model_config(
-    model_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_user)
-):
+def get_model_config(model_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_user)):
     model = session.get(ModelConfig, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="模型配置不存在")
@@ -748,12 +835,7 @@ def get_model_config(
 
 
 @app.put("/models/{model_id}", response_model=ModelConfigPublic)
-def update_model_config(
-    model_id: int,
-    payload: ModelConfigUpdate,
-    session: Session = Depends(get_session),
-    _: User = Depends(require_admin),
-):
+def update_model_config(model_id: int, payload: ModelConfigUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     model = session.get(ModelConfig, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="模型配置不存在")
@@ -797,9 +879,7 @@ def update_model_config(
 
 
 @app.delete("/models/{model_id}", status_code=204)
-def delete_model_config(
-    model_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def delete_model_config(model_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     model = session.get(ModelConfig, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="模型配置不存在")
@@ -810,11 +890,7 @@ def delete_model_config(
 
 
 @app.post("/chat/completions", response_model=ChatCompletionResponse)
-def create_chat_completion(
-    payload: ChatCompletionRequest,
-    session: Session = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
+def create_chat_completion(payload: ChatCompletionRequest, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     model: Optional[ModelConfig] = None
     if payload.model_id:
         model = session.get(ModelConfig, payload.model_id)
@@ -858,6 +934,7 @@ def create_chat_completion(
         request_body["stream"] = True
 
     if payload.stream:
+
         def stream_response():
             try:
                 with httpx.Client(timeout=30.0) as client:
@@ -881,7 +958,7 @@ def create_chat_completion(
                         for chunk in upstream_response.iter_text():
                             if chunk:
                                 yield chunk
-            except httpx.RequestError as exc:  # pragma: no cover - 网络异常依赖外部环境
+            except httpx.RequestError as exc:  # pragma: no cover
                 raise HTTPException(status_code=502, detail=f"请求上游模型失败：{exc}") from exc
 
         return StreamingResponse(stream_response(), media_type="text/event-stream")
@@ -893,7 +970,7 @@ def create_chat_completion(
                 headers={"Authorization": f"Bearer {model.api_key}"},
                 json=request_body,
             )
-    except httpx.RequestError as exc:  # pragma: no cover - 网络异常依赖外部环境
+    except httpx.RequestError as exc:  # pragma: no cover
         raise HTTPException(status_code=502, detail=f"请求上游模型失败：{exc}") from exc
 
     if upstream_response.status_code >= 400:
@@ -910,17 +987,12 @@ def create_chat_completion(
     data.setdefault("object", "chat.completion")
     data.setdefault("created", now_ts)
     data.setdefault("model", model.model_name)
-    data.setdefault(
-        "usage",
-        {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    )
+    data.setdefault("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
     return data
 
 
 @app.post("/web/categories", response_model=WebCategoryPublic, status_code=status.HTTP_201_CREATED)
-def create_web_category(
-    payload: WebCategoryCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def create_web_category(payload: WebCategoryCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     existing = session.exec(select(WebCategory).where(WebCategory.name == payload.name)).first()
     if existing:
         raise HTTPException(status_code=400, detail="分类名称已存在")
@@ -933,17 +1005,13 @@ def create_web_category(
 
 
 @app.get("/web/categories", response_model=List[WebCategoryPublic])
-def list_web_categories(
-    session: Session = Depends(get_session), _: User = Depends(get_current_user)
-):
+def list_web_categories(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
     categories = session.exec(select(WebCategory)).all()
     return [WebCategoryPublic(id=c.id, name=c.name, description=c.description) for c in categories]
 
 
 @app.delete("/web/categories/{category_id}", status_code=204)
-def delete_web_category(
-    category_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def delete_web_category(category_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     category = session.get(WebCategory, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="分类不存在")
@@ -957,9 +1025,7 @@ def delete_web_category(
 
 
 @app.post("/web/pages", response_model=WebPagePublic, status_code=status.HTTP_201_CREATED)
-def create_web_page(
-    payload: WebPageCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def create_web_page(payload: WebPageCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     category = session.get(WebCategory, payload.category_id)
     if not category:
         raise HTTPException(status_code=404, detail="分类不存在")
@@ -987,11 +1053,7 @@ def create_web_page(
 
 
 @app.get("/web/pages", response_model=List[WebPagePublic])
-def list_web_pages(
-    category_id: Optional[int] = None,
-    session: Session = Depends(get_session),
-    _: User = Depends(get_current_user),
-):
+def list_web_pages(category_id: Optional[int] = None, session: Session = Depends(get_session), _: User = Depends(get_current_user)):
     query = select(WebPage)
     if category_id:
         query = query.where(WebPage.category_id == category_id)
@@ -1011,9 +1073,7 @@ def list_web_pages(
 
 
 @app.delete("/web/pages/{page_id}", status_code=204)
-def delete_web_page(
-    page_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def delete_web_page(page_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     page = session.get(WebPage, page_id)
     if not page:
         raise HTTPException(status_code=404, detail="网页记录不存在")
@@ -1028,11 +1088,7 @@ def summary(session: Session = Depends(get_session), _: User = Depends(get_curre
     users = session.exec(select(User)).all()
     total_balance = sum(user.balance for user in users)
     models = session.exec(select(ModelConfig)).all()
-    return {
-        "user_count": len(users),
-        "total_balance": total_balance,
-        "model_count": len(models),
-    }
+    return {"user_count": len(users), "total_balance": total_balance, "model_count": len(models)}
 
 
 @app.get("/roles")
@@ -1051,9 +1107,7 @@ def list_role_prompts(session: Session = Depends(get_session), _: User = Depends
 
 
 @app.post("/role-prompts", response_model=RolePromptPublic, status_code=status.HTTP_201_CREATED)
-def create_role_prompt(
-    payload: RolePromptCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def create_role_prompt(payload: RolePromptCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     existing = session.exec(select(RolePrompt).where(RolePrompt.name == payload.name)).first()
     if existing:
         raise HTTPException(status_code=400, detail="提示词名称已存在")
@@ -1066,12 +1120,7 @@ def create_role_prompt(
 
 
 @app.put("/role-prompts/{prompt_id}", response_model=RolePromptPublic)
-def update_role_prompt(
-    prompt_id: int,
-    payload: RolePromptUpdate,
-    session: Session = Depends(get_session),
-    _: User = Depends(require_admin),
-):
+def update_role_prompt(prompt_id: int, payload: RolePromptUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     record = session.get(RolePrompt, prompt_id)
     if not record:
         raise HTTPException(status_code=404, detail="提示词不存在")
@@ -1092,9 +1141,7 @@ def update_role_prompt(
 
 
 @app.delete("/role-prompts/{prompt_id}", status_code=204)
-def delete_role_prompt(
-    prompt_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)
-):
+def delete_role_prompt(prompt_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     record = session.get(RolePrompt, prompt_id)
     if not record:
         raise HTTPException(status_code=404, detail="提示词不存在")
@@ -1138,7 +1185,7 @@ def dashboard(request: Request, session: Session = Depends(get_session), _: User
     summary_data = summary(session, _)  # type: ignore[arg-type]
     now = dt.datetime.now()
     client_ip = request.client.host if request.client else "unknown"
-    weather = "晴朗"  # 占位天气，避免依赖外部服务
+    weather = "晴朗"
     return {
         "summary": summary_data,
         "redis": redis_stats(),

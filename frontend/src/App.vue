@@ -32,6 +32,7 @@ const editingRolePrompt = ref(null)
 const chatMessages = ref([])
 const chatInput = ref('')
 const chatModelId = ref(null)
+
 const contacts = ref([])
 const peerMessages = ref([])
 const selectedPeerId = ref(null)
@@ -39,7 +40,14 @@ const peerInput = ref('')
 const peerSending = ref(false)
 const peerMessagesLoading = ref(false)
 const contactSearch = ref('')
-const defaultRolePrompt = '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
+
+const defaultRolePrompt =
+  '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
+
+// 未读数：key=peerId, value=count
+const unreadMap = ref({})
+// 联系人最近一条消息预览（可选展示）
+const lastPreviewMap = ref({})
 
 const modals = ref({
   login: false,
@@ -90,21 +98,28 @@ const forms = ref({
 const isAuthed = computed(() => Boolean(token.value))
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const currentChatModel = computed(() => models.value.find((m) => m.id === chatModelId.value))
+
 const currentRolePrompt = computed(() => {
   const target = rolePrompts.value.find((item) => item.id === selectedRoleId.value)
   if (target) return target.prompt
   return defaultRolePrompt
 })
+
 const availableContacts = computed(() => {
   const keyword = contactSearch.value.trim().toLowerCase()
   return contacts.value
     .filter((item) => item.id !== currentUser.value?.id)
     .filter((item) => !keyword || item.name.toLowerCase().includes(keyword))
     .sort((a, b) => {
-      if (a.is_online === b.is_online) return a.name.localeCompare(b.name)
-      return a.is_online ? -1 : 1
+      // 未读优先，其次在线优先，其次名字
+      const au = Number(unreadMap.value?.[a.id] || 0)
+      const bu = Number(unreadMap.value?.[b.id] || 0)
+      if (au !== bu) return bu - au
+      if (a.is_online !== b.is_online) return a.is_online ? -1 : 1
+      return a.name.localeCompare(b.name)
     })
 })
+
 const selectedPeer = computed(() => contacts.value.find((item) => item.id === selectedPeerId.value) || null)
 
 function setStatus(type, message) {
@@ -124,6 +139,8 @@ function setAuth(newToken, user) {
 }
 
 function clearAuth() {
+  disconnectWs()
+
   token.value = ''
   currentUser.value = null
   rolePrompts.value = []
@@ -132,6 +149,8 @@ function clearAuth() {
   peerMessages.value = []
   selectedPeerId.value = null
   peerInput.value = ''
+  unreadMap.value = {}
+  lastPreviewMap.value = {}
   localStorage.removeItem('token')
   localStorage.removeItem('user')
 }
@@ -259,13 +278,38 @@ async function fetchLogs() {
   logs.value = res.lines || []
 }
 
-async function fetchContacts() {
+function clearUnread(peerId) {
+  if (!peerId) return
+  unreadMap.value = { ...unreadMap.value, [peerId]: 0 }
+}
+
+function incUnread(peerId) {
+  if (!peerId) return
+  const current = Number(unreadMap.value?.[peerId] || 0)
+  unreadMap.value = { ...unreadMap.value, [peerId]: current + 1 }
+}
+
+function setLastPreview(peerId, content) {
+  if (!peerId) return
+  const trimmed = (content || '').trim()
+  if (!trimmed) return
+  const preview = trimmed.length > 30 ? `${trimmed.slice(0, 30)}…` : trimmed
+  lastPreviewMap.value = { ...lastPreviewMap.value, [peerId]: preview }
+}
+
+async function fetchContacts({ keepSelected = true } = {}) {
   if (!isAuthed.value) {
     contacts.value = []
     return
   }
   try {
     contacts.value = await request('/contacts')
+    if (!keepSelected) {
+      selectedPeerId.value = contacts.value[0]?.id || null
+      if (selectedPeerId.value) await fetchPeerMessages(selectedPeerId.value)
+      return
+    }
+    // 保持已选会话
     const hasSelected = contacts.value.some((item) => item.id === selectedPeerId.value)
     if (!hasSelected) {
       selectedPeerId.value = contacts.value[0]?.id || null
@@ -282,7 +326,13 @@ async function fetchPeerMessages(peerId) {
   if (!peerId) return
   peerMessagesLoading.value = true
   try {
-    peerMessages.value = await request(`/contacts/messages/${peerId}`)
+    const res = await request(`/contacts/messages/${peerId}`)
+    peerMessages.value = res || []
+    // 更新预览
+    const last = peerMessages.value[peerMessages.value.length - 1]
+    if (last?.content) setLastPreview(peerId, last.content)
+    // 打开会话即清未读
+    clearUnread(peerId)
   } catch (error) {
     setStatus('error', error.message)
   } finally {
@@ -327,6 +377,7 @@ async function handleLogin() {
     modals.value.login = false
     setStatus('success', '登录成功')
     await syncAll()
+    connectWs()
   } catch (error) {
     setStatus('error', error.message)
   }
@@ -638,6 +689,9 @@ async function deleteUser(userId) {
   }
 }
 
+// ---------------------------
+// Chat stream (原逻辑保留)
+// ---------------------------
 async function handleStreamResponse(response, assistantIndex) {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -659,7 +713,8 @@ async function handleStreamResponse(response, assistantIndex) {
       }
       try {
         const parsed = JSON.parse(dataStr)
-        const delta = parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.message?.content || ''
+        const delta =
+          parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.message?.content || ''
         if (delta) {
           chatMessages.value[assistantIndex].content += delta
         }
@@ -735,6 +790,34 @@ function resetChat() {
   chatInput.value = ''
 }
 
+// ---------------------------
+// 站内互聊：发送（去重 + 预览）
+// ---------------------------
+function stableMsgKey(msg) {
+  // 后端有 id 最好，没有则做一个稳定 key
+  if (msg?.id != null) return `id:${msg.id}`
+  const s = `${msg?.sender_id || ''}|${msg?.receiver_id || ''}|${msg?.created_at || ''}|${msg?.content || ''}`
+  return `h:${hashString(s)}`
+}
+
+function hashString(s) {
+  let h = 0
+  for (let i = 0; i < s.length; i++) {
+    h = (h << 5) - h + s.charCodeAt(i)
+    h |= 0
+  }
+  return String(h)
+}
+
+function upsertPeerMessage(msg) {
+  if (!msg) return
+  const key = stableMsgKey(msg)
+  const exists = peerMessages.value.some((m) => stableMsgKey(m) === key)
+  if (exists) return
+  peerMessages.value.push(msg)
+  peerMessages.value.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+}
+
 async function sendPeerMessage() {
   if (!selectedPeerId.value) {
     setStatus('error', '请先选择联系人')
@@ -751,7 +834,8 @@ async function sendPeerMessage() {
       method: 'POST',
       body: JSON.stringify({ receiver_id: selectedPeerId.value, content }),
     })
-    peerMessages.value.push(res)
+    upsertPeerMessage(res)
+    setLastPreview(selectedPeerId.value, content)
     peerInput.value = ''
   } catch (error) {
     setStatus('error', error.message)
@@ -760,20 +844,199 @@ async function sendPeerMessage() {
   }
 }
 
+// ---------------------------
+// WebSocket：实时收消息 + 未读
+// ---------------------------
+const wsRef = ref(null)
+const wsConnected = ref(false)
+const wsConnecting = ref(false)
+const wsRetry = ref(0)
+let wsReconnectTimer = null
+let wsHeartbeatTimer = null
+
+function safeJsonParse(s) {
+  try {
+    return JSON.parse(s)
+  } catch {
+    return null
+  }
+}
+
+function buildWsUrl() {
+  // 支持 apiBase 有无 path
+  // http://x:8001 -> ws://x:8001/ws?token=...
+  // https://... -> wss://...
+  const base = new URL(apiBase)
+  base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
+  base.pathname = '/ws'
+  base.search = `?token=${encodeURIComponent(token.value || '')}`
+  return base.toString()
+}
+
+function clearWsTimers() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer)
+    wsReconnectTimer = null
+  }
+  if (wsHeartbeatTimer) {
+    clearInterval(wsHeartbeatTimer)
+    wsHeartbeatTimer = null
+  }
+}
+
+function disconnectWs() {
+  clearWsTimers()
+  wsConnected.value = false
+  wsConnecting.value = false
+  wsRetry.value = 0
+  try {
+    wsRef.value?.close?.()
+  } catch {}
+  wsRef.value = null
+}
+
+function scheduleReconnect() {
+  clearWsTimers()
+  if (!token.value) return
+  // 指数退避（上限 12s）+ 抖动
+  const base = Math.min(800 * Math.pow(2, wsRetry.value), 12000)
+  const jitter = Math.floor(Math.random() * 400)
+  const delay = base + jitter
+  wsReconnectTimer = setTimeout(() => {
+    wsRetry.value += 1
+    connectWs()
+  }, delay)
+}
+
+function resolveOtherPeerId(msg) {
+  // other = (sender == me ? receiver : sender)
+  const me = currentUser.value?.id
+  if (!me) return null
+  if (Number(msg.sender_id) === Number(me)) return Number(msg.receiver_id)
+  return Number(msg.sender_id)
+}
+
+function handleIncomingPeerMessage(msg) {
+  const otherId = resolveOtherPeerId(msg)
+  if (!otherId) return
+
+  setLastPreview(otherId, msg.content)
+
+  // 当前会话
+  if (Number(selectedPeerId.value) === Number(otherId)) {
+    upsertPeerMessage(msg)
+    clearUnread(otherId)
+    return
+  }
+
+  // 非当前会话 -> 未读 + 轻提示
+  incUnread(otherId)
+}
+
+function handleWsMessage(evt) {
+  const raw = evt?.data
+  if (!raw) return
+
+  // 支持后端回 'pong' / 'ping'
+  if (raw === 'pong' || raw === 'ping') return
+
+  const payload = typeof raw === 'string' ? safeJsonParse(raw) : raw
+
+  if (!payload) return
+
+  // 兼容两种格式：
+  // 1) { type: 'peer_message', data: {...} }
+  // 2) 直接就是消息体 {...sender_id, receiver_id, content...}
+  if (payload.type === 'peer_message' && payload.data) {
+    handleIncomingPeerMessage(payload.data)
+    return
+  }
+  if (payload.sender_id && payload.receiver_id && payload.content) {
+    handleIncomingPeerMessage(payload)
+    return
+  }
+}
+
+function connectWs() {
+  if (!token.value) return
+  if (wsRef.value && (wsRef.value.readyState === WebSocket.OPEN || wsRef.value.readyState === WebSocket.CONNECTING)) {
+    return
+  }
+
+  wsConnecting.value = true
+  wsConnected.value = false
+
+  let wsUrl = ''
+  try {
+    wsUrl = buildWsUrl()
+  } catch (e) {
+    wsConnecting.value = false
+    setStatus('error', 'WebSocket 地址解析失败，请检查 VITE_API_BASE')
+    return
+  }
+
+  const ws = new WebSocket(wsUrl)
+  wsRef.value = ws
+
+  ws.onopen = async () => {
+    wsConnected.value = true
+    wsConnecting.value = false
+    wsRetry.value = 0
+
+    clearWsTimers()
+    // 心跳
+    wsHeartbeatTimer = setInterval(() => {
+      try {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+      } catch {}
+    }, 20000)
+
+    // 连接成功后刷新一次在线状态（不强制拉消息）
+    fetchContacts({ keepSelected: true })
+  }
+
+  ws.onmessage = handleWsMessage
+
+  ws.onclose = () => {
+    wsConnected.value = false
+    wsConnecting.value = false
+    scheduleReconnect()
+  }
+
+  ws.onerror = () => {
+    wsConnected.value = false
+    wsConnecting.value = false
+    try { ws.close() } catch {}
+  }
+}
+
+// ---------------------------
+// 生命周期 & watch
+// ---------------------------
 watch(
   () => selectedPeerId.value,
   (peerId) => {
     if (peerId) {
       fetchPeerMessages(peerId)
+      clearUnread(peerId)
     } else {
       peerMessages.value = []
     }
   }
 )
 
+watch(
+  () => token.value,
+  (val) => {
+    if (val) connectWs()
+    else disconnectWs()
+  }
+)
+
 onMounted(() => {
   if (token.value) {
     syncAll()
+    connectWs()
   }
 })
 </script>
@@ -832,7 +1095,12 @@ onMounted(() => {
             <button class="outline" @click="modals.register = true">注册</button>
           </template>
           <template v-else>
-            <div class="avatar">{{ currentUser?.name }} / {{ currentUser?.role }}</div>
+            <div class="avatar">
+              {{ currentUser?.name }} / {{ currentUser?.role }}
+              <span class="ws-pill" :class="{ ok: wsConnected, bad: !wsConnected }" title="站内互聊实时连接状态">
+                {{ wsConnected ? '实时' : (wsConnecting ? '连接中' : '离线') }}
+              </span>
+            </div>
             <button class="outline" @click="handleLogout">退出</button>
           </template>
         </div>
@@ -850,6 +1118,7 @@ onMounted(() => {
       <template v-else>
         <section v-if="loading" class="loading-banner">正在加载...</section>
 
+        <!-- 站内互聊 -->
         <section class="panel neon-panel wechat-panel" v-if="activeMenu === 'contacts'">
           <div class="panel-header">
             <div>
@@ -857,8 +1126,15 @@ onMounted(() => {
               <h3>仿微信气泡 · 在线联系人</h3>
             </div>
             <div class="header-actions">
+              <div class="meta-chip">
+                实时：
+                <span :style="{ fontWeight: 600 }">
+                  {{ wsConnected ? '已连接' : (wsConnecting ? '连接中' : '未连接') }}
+                </span>
+              </div>
               <div class="meta-chip">在线 {{ contacts.filter((item) => item.is_online).length }} 人</div>
-              <button class="outline" @click="fetchContacts">刷新联系人</button>
+              <button class="outline" @click="fetchContacts({ keepSelected: true })">刷新联系人</button>
+              <button class="outline" @click="connectWs" :disabled="wsConnected || wsConnecting">重连</button>
             </div>
           </div>
 
@@ -873,6 +1149,7 @@ onMounted(() => {
                 />
                 <p class="muted small">点击左侧联系人即可发起聊天</p>
               </div>
+
               <div class="peer-items">
                 <button
                   v-for="contact in availableContacts"
@@ -882,7 +1159,16 @@ onMounted(() => {
                 >
                   <div class="peer-avatar" :data-online="contact.is_online">
                     {{ contact.name.slice(0, 1) }}
+                    <!-- 红点/未读数 -->
+                    <span
+                      v-if="Number(unreadMap?.[contact.id] || 0) > 0"
+                      class="unread-badge"
+                      :title="`未读 ${unreadMap[contact.id]} 条`"
+                    >
+                      {{ unreadMap[contact.id] > 99 ? '99+' : unreadMap[contact.id] }}
+                    </span>
                   </div>
+
                   <div class="peer-meta">
                     <div class="peer-title">
                       <span class="contact-name">{{ contact.name }}</span>
@@ -890,9 +1176,13 @@ onMounted(() => {
                         {{ contact.is_online ? '在线' : '离线' }}
                       </span>
                     </div>
-                    <p class="muted small">角色：{{ contact.role }}</p>
+                    <p class="muted small">
+                      角色：{{ contact.role }}
+                      <span v-if="lastPreviewMap?.[contact.id]" class="preview"> · {{ lastPreviewMap[contact.id] }}</span>
+                    </p>
                   </div>
                 </button>
+
                 <div v-if="!availableContacts.length" class="empty muted">
                   暂无匹配的联系人，可刷新或清空搜索。
                 </div>
@@ -926,12 +1216,16 @@ onMounted(() => {
               <div class="wechat-body peer-body">
                 <div
                   v-for="msg in peerMessages"
-                  :key="msg.id"
+                  :key="msg.id ?? (msg.sender_id + '-' + msg.created_at)"
                   class="wechat-row"
                   :class="msg.sender_id === currentUser?.id ? 'right' : 'left'"
                 >
                   <div class="wechat-avatar" :class="msg.sender_id === currentUser?.id ? 'user' : 'assistant'">
-                    {{ msg.sender_id === currentUser?.id ? currentUser?.name?.slice(0, 1) || '我' : msg.sender_name?.slice(0, 1) || 'Ta' }}
+                    {{
+                      msg.sender_id === currentUser?.id
+                        ? currentUser?.name?.slice(0, 1) || '我'
+                        : msg.sender_name?.slice(0, 1) || 'Ta'
+                    }}
                   </div>
                   <div class="wechat-bubble" :class="msg.sender_id === currentUser?.id ? 'user' : 'assistant'">
                     <div class="bubble-meta">
@@ -958,7 +1252,10 @@ onMounted(() => {
                 <div class="composer-actions">
                   <div>
                     <p class="muted small">聊天对象：{{ selectedPeer?.name || '未选择' }}</p>
-                    <p class="muted small">在线状态：{{ selectedPeer?.is_online ? '在线' : '离线' }}</p>
+                    <p class="muted small">
+                      在线状态：{{ selectedPeer?.is_online ? '在线' : '离线' }} ·
+                      实时：{{ wsConnected ? '已连接' : '未连接' }}
+                    </p>
                   </div>
                   <div class="composer-buttons">
                     <button class="ghost" @click="peerInput = ''" :disabled="!selectedPeer">清空</button>
@@ -972,6 +1269,7 @@ onMounted(() => {
           </div>
         </section>
 
+        <!-- Chat（原样保留） -->
         <section class="panel neon-panel wechat-panel" v-if="activeMenu === 'chat'">
           <div class="panel-header">
             <div>
@@ -1056,7 +1354,9 @@ onMounted(() => {
                 <div class="composer-actions">
                   <div>
                     <p class="muted small">Markdown 渲染友好，历史自动拼接。</p>
-                    <p class="muted small">当前角色：{{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }}</p>
+                    <p class="muted small">
+                      当前角色：{{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }}
+                    </p>
                   </div>
                   <div class="composer-buttons">
                     <button class="ghost" @click="resetChat">重置</button>
@@ -1091,6 +1391,7 @@ onMounted(() => {
           </div>
         </section>
 
+        <!-- 首页 -->
         <section class="panel-grid" v-if="activeMenu === 'home'">
           <div class="panel stat">
             <p class="label">Redis 注册数</p>
@@ -1119,6 +1420,7 @@ onMounted(() => {
           </div>
         </section>
 
+        <!-- 模型管理（原样保留） -->
         <section class="panel" v-if="activeMenu === 'models'">
           <div class="panel-header">
             <div>
@@ -1148,7 +1450,9 @@ onMounted(() => {
                     <td>{{ item.name }}</td>
                     <td>{{ item.model_name }}</td>
                     <td>{{ item.max_tokens }}</td>
-                    <td v-if="isAdmin"><button class="ghost danger" @click.stop="deleteModel(item.id)">删除</button></td>
+                    <td v-if="isAdmin">
+                      <button class="ghost danger" @click.stop="deleteModel(item.id)">删除</button>
+                    </td>
                   </tr>
                   <tr v-if="!models.length">
                     <td colspan="5" class="muted">暂无配置</td>
@@ -1176,6 +1480,7 @@ onMounted(() => {
           </div>
         </section>
 
+        <!-- 网页收藏（原样保留） -->
         <section class="panel" v-if="activeMenu === 'web'">
           <div class="panel-header">
             <div>
@@ -1183,7 +1488,9 @@ onMounted(() => {
               <h3>分类与账号信息</h3>
             </div>
             <div class="header-actions">
-              <button class="outline" @click="fetchPages(selectedCategory?.id || null)" :disabled="!categories.length">刷新网页</button>
+              <button class="outline" @click="fetchPages(selectedCategory?.id || null)" :disabled="!categories.length">
+                刷新网页
+              </button>
               <button class="outline" @click="modals.category = true" :disabled="!isAdmin">新建分类</button>
               <button @click="modals.page = true" :disabled="!isAdmin || !categories.length">新增网页</button>
             </div>
@@ -1243,6 +1550,7 @@ onMounted(() => {
           </div>
         </section>
 
+        <!-- 用户与角色（原样保留） -->
         <section class="panel" v-if="activeMenu === 'users' && isAdmin">
           <div class="panel-header">
             <div>
@@ -1272,12 +1580,7 @@ onMounted(() => {
                   <td><span class="tag">{{ user.role }}</span></td>
                   <td>¥ {{ user.balance.toFixed(2) }}</td>
                   <td class="row-actions">
-                    <input
-                      type="number"
-                      v-model.number="forms.balance.amount"
-                      placeholder="调整金额"
-                      class="inline-input"
-                    />
+                    <input type="number" v-model.number="forms.balance.amount" placeholder="调整金额" class="inline-input" />
                     <button class="ghost" @click="forms.balance.userId = user.id; updateBalance(user.id)">
                       调整余额
                     </button>
@@ -1293,6 +1596,7 @@ onMounted(() => {
           </div>
         </section>
 
+        <!-- 日志（原样保留） -->
         <section class="panel" v-if="activeMenu === 'logs' && isAdmin">
           <div class="panel-header">
             <div>
@@ -1323,6 +1627,7 @@ onMounted(() => {
         </section>
       </template>
 
+      <!-- 下面这些 modal 你原本就有，我保持原样 -->
       <div v-if="modals.login" class="modal-mask">
         <div class="modal">
           <div class="modal-header">
@@ -1529,3 +1834,53 @@ onMounted(() => {
     </main>
   </div>
 </template>
+
+<style scoped>
+/* 只加和“未读/实时状态”相关的最小样式，不碰你原有大样式体系 */
+.unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ff3b30;
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 14px rgba(255, 59, 48, 0.25);
+}
+
+.peer-avatar {
+  position: relative;
+}
+
+.preview {
+  opacity: 0.9;
+}
+
+.ws-pill {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.ws-pill.ok {
+  background: rgba(0, 200, 83, 0.18);
+}
+
+.ws-pill.bad {
+  background: rgba(255, 59, 48, 0.18);
+}
+</style>
