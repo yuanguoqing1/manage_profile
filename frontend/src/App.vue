@@ -743,87 +743,123 @@ onMounted(() => {
       <template v-else>
         <section v-if="loading" class="loading-banner">正在加载...</section>
 
-        <section class="panel neon-panel" v-if="activeMenu === 'chat'">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">星际对话</p>
-                <h3>大模型聊天舱</h3>
-              </div>
-              <div class="header-actions">
+        <section class="panel neon-panel wechat-panel" v-if="activeMenu === 'chat'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">微信风格对话</p>
+              <h3>对话面板 · 沉浸式气泡</h3>
+            </div>
+            <div class="header-actions wechat-toolbar">
+              <div class="toolbar-field">
+                <label>角色预设</label>
                 <select v-model="selectedRoleId" class="inline-input">
                   <option v-for="prompt in rolePrompts" :key="prompt.id" :value="prompt.id">
                     {{ prompt.name }}
                   </option>
                   <option v-if="!rolePrompts.length" :value="null">默认提示词</option>
                 </select>
-                <button class="outline" v-if="isAdmin" @click="modals.rolePrompt = true">新增提示词</button>
+              </div>
+              <div class="toolbar-field">
+                <label>使用模型</label>
                 <select v-model="chatModelId" class="inline-input" :disabled="!models.length">
                   <option v-for="model in models" :key="model.id" :value="model.id">{{ model.name }}</option>
                 </select>
-                <button class="outline" @click="resetChat">清空历史</button>
               </div>
+              <div class="toolbar-buttons">
+                <button class="outline" @click="resetChat">清空历史</button>
+                <button class="outline" v-if="isAdmin" @click="modals.rolePrompt = true">新增提示词</button>
+              </div>
+            </div>
           </div>
-          <div class="chat-grid">
-              <div class="chat-log">
+
+          <div class="wechat-chat">
+            <div class="wechat-window">
+              <div class="wechat-topbar">
+                <div class="wechat-contact">
+                  <div class="wechat-avatar">{{ currentChatModel?.name?.slice(0, 1) || '星' }}</div>
+                  <div>
+                    <p class="contact-name">{{ currentChatModel?.name || '星链助手' }}</p>
+                    <p class="contact-desc">
+                      {{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }} · 双击 Enter 换行
+                    </p>
+                  </div>
+                </div>
+                <div class="wechat-meta">
+                  <span class="meta-chip">上下文 {{ chatMessages.length }} 条</span>
+                  <span class="meta-chip" v-if="chatLoading">正在生成...</span>
+                </div>
+              </div>
+
+              <div class="wechat-body">
                 <div
                   v-for="(msg, index) in chatMessages"
                   :key="index"
-                  class="chat-bubble"
-                :class="msg.role === 'assistant' ? 'assistant' : 'user'"
-              >
-                <div class="bubble-meta">
-                  <span class="role-tag">{{ msg.role === 'assistant' ? 'AI 导航' : '我' }}</span>
-                  <button class="icon ghost" @click="deleteChatMessage(index)" title="删除这条记录">×</button>
+                  class="wechat-row"
+                  :class="msg.role === 'assistant' ? 'left' : 'right'"
+                >
+                  <div class="wechat-avatar" :class="msg.role === 'assistant' ? 'assistant' : 'user'">
+                    {{ msg.role === 'assistant' ? 'AI' : (currentUser?.name?.slice(0, 1) || '我') }}
+                  </div>
+                  <div class="wechat-bubble" :class="msg.role === 'assistant' ? 'assistant' : 'user'">
+                    <div class="bubble-meta">
+                      <span class="role-tag">{{ msg.role === 'assistant' ? '星链助手' : '我' }}</span>
+                      <button class="icon ghost" @click="deleteChatMessage(index)" title="删除这条记录">×</button>
+                    </div>
+                    <div class="bubble-body" v-html="renderMarkdown(msg.content)"></div>
+                  </div>
                 </div>
-                  <div class="bubble-body" v-html="renderMarkdown(msg.content)"></div>
-                </div>
+
                 <div v-if="!chatMessages.length" class="empty muted">还没有对话记录，发送后会自动携带上下文。</div>
                 <div v-if="chatLoading" class="chat-loading-hint">
                   <span class="spinner"></span>
                   <span>AI 正在生成回答，请稍候...</span>
                 </div>
               </div>
-              <div class="chat-composer">
+
+              <div class="wechat-composer">
                 <textarea
                   v-model="chatInput"
-                rows="5"
-                class="chat-input"
-                placeholder="描述你的任务、提问或贴上一段代码片段..."
-                @keyup.enter.exact.prevent="sendChat"
+                  rows="5"
+                  class="wechat-input"
+                  placeholder="仿微信气泡体验：输入问题或需求，Enter 发送，Shift+Enter 换行"
+                  @keyup.enter.exact.prevent="sendChat"
                 ></textarea>
                 <div class="composer-actions">
                   <div>
-                    <p class="muted small">使用 Markdown 渲染，历史消息随请求自动附带。</p>
-                    <p class="muted small">当前模型：{{ currentChatModel?.name || '未选择' }}</p>
-                    <p class="muted small">
-                      当前角色：{{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }}
-                    </p>
+                    <p class="muted small">Markdown 渲染友好，历史自动拼接。</p>
+                    <p class="muted small">当前角色：{{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }}</p>
                   </div>
-                  <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送星链' }}</button>
+                  <div class="composer-buttons">
+                    <button class="ghost" @click="resetChat">重置</button>
+                    <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送' }}</button>
+                  </div>
                 </div>
               </div>
             </div>
-            <div class="table-wrapper" v-if="rolePrompts.length">
-              <table class="table compact">
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>提示词</th>
-                    <th v-if="isAdmin">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in rolePrompts" :key="item.id">
-                    <td>{{ item.name }}</td>
-                    <td>{{ item.prompt }}</td>
-                    <td v-if="isAdmin" class="row-actions">
-                      <button class="ghost" @click="openEditRolePrompt(item)">编辑</button>
-                      <button class="ghost danger" @click="deleteRolePrompt(item.id)">删除</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+          </div>
+
+          <div class="table-wrapper" v-if="rolePrompts.length">
+            <div class="table-title">角色提示词库</div>
+            <table class="table compact">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>提示词</th>
+                  <th v-if="isAdmin">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in rolePrompts" :key="item.id">
+                  <td>{{ item.name }}</td>
+                  <td>{{ item.prompt }}</td>
+                  <td v-if="isAdmin" class="row-actions">
+                    <button class="ghost" @click="openEditRolePrompt(item)">编辑</button>
+                    <button class="ghost danger" @click="deleteRolePrompt(item.id)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section class="panel-grid" v-if="activeMenu === 'home'">
