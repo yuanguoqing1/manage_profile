@@ -17,11 +17,6 @@ body {
   min-height: 100vh;
 }
 
-html.christmas-grayscale body,
-html.christmas-grayscale .app-shell {
-  filter: grayscale(1);
-}
-
 html.light-mode {
   background-color: #f5f6fa;
 }
