@@ -38,6 +38,7 @@ const selectedPeerId = ref(null)
 const peerInput = ref('')
 const peerSending = ref(false)
 const peerMessagesLoading = ref(false)
+const contactSearch = ref('')
 const defaultRolePrompt = '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
 
 const modals = ref({
@@ -94,10 +95,17 @@ const currentRolePrompt = computed(() => {
   if (target) return target.prompt
   return defaultRolePrompt
 })
-const availableContacts = computed(() =>
-  contacts.value.filter((item) => item.id !== currentUser.value?.id).sort((a, b) => a.name.localeCompare(b.name))
-)
-const selectedPeer = computed(() => availableContacts.value.find((item) => item.id === selectedPeerId.value) || null)
+const availableContacts = computed(() => {
+  const keyword = contactSearch.value.trim().toLowerCase()
+  return contacts.value
+    .filter((item) => item.id !== currentUser.value?.id)
+    .filter((item) => !keyword || item.name.toLowerCase().includes(keyword))
+    .sort((a, b) => {
+      if (a.is_online === b.is_online) return a.name.localeCompare(b.name)
+      return a.is_online ? -1 : 1
+    })
+})
+const selectedPeer = computed(() => contacts.value.find((item) => item.id === selectedPeerId.value) || null)
 
 function setStatus(type, message) {
   status.value = { type, message }
@@ -258,8 +266,12 @@ async function fetchContacts() {
   }
   try {
     contacts.value = await request('/contacts')
-    if (!selectedPeerId.value && contacts.value.length) {
-      selectedPeerId.value = contacts.value[0].id
+    const hasSelected = contacts.value.some((item) => item.id === selectedPeerId.value)
+    if (!hasSelected) {
+      selectedPeerId.value = contacts.value[0]?.id || null
+    }
+    if (selectedPeerId.value) {
+      await fetchPeerMessages(selectedPeerId.value)
     }
   } catch (error) {
     setStatus('error', error.message)
@@ -355,6 +367,7 @@ async function handleLogout() {
   peerMessages.value = []
   selectedPeerId.value = null
   peerInput.value = ''
+  contactSearch.value = ''
   dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
 }
 
@@ -780,6 +793,13 @@ onMounted(() => {
         <button :class="{ active: activeMenu === 'chat' }" @click="activeMenu = 'chat'" :disabled="!isAuthed">
           星际聊天
         </button>
+        <button
+          :class="{ active: activeMenu === 'contacts' }"
+          @click="activeMenu = 'contacts'"
+          :disabled="!isAuthed"
+        >
+          站内互聊
+        </button>
         <button :class="{ active: activeMenu === 'models' }" @click="activeMenu = 'models'" :disabled="!isAuthed">
           大模型管理
         </button>
@@ -829,6 +849,128 @@ onMounted(() => {
 
       <template v-else>
         <section v-if="loading" class="loading-banner">正在加载...</section>
+
+        <section class="panel neon-panel wechat-panel" v-if="activeMenu === 'contacts'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">站内互聊</p>
+              <h3>仿微信气泡 · 在线联系人</h3>
+            </div>
+            <div class="header-actions">
+              <div class="meta-chip">在线 {{ contacts.filter((item) => item.is_online).length }} 人</div>
+              <button class="outline" @click="fetchContacts">刷新联系人</button>
+            </div>
+          </div>
+
+          <div class="peer-chat">
+            <div class="peer-list">
+              <div class="peer-list-header">
+                <input
+                  v-model="contactSearch"
+                  class="inline-input"
+                  placeholder="搜索联系人或昵称"
+                  aria-label="搜索联系人"
+                />
+                <p class="muted small">点击左侧联系人即可发起聊天</p>
+              </div>
+              <div class="peer-items">
+                <button
+                  v-for="contact in availableContacts"
+                  :key="contact.id"
+                  :class="['peer-item', { active: contact.id === selectedPeerId } ]"
+                  @click="openPeerChat(contact)"
+                >
+                  <div class="peer-avatar" :data-online="contact.is_online">
+                    {{ contact.name.slice(0, 1) }}
+                  </div>
+                  <div class="peer-meta">
+                    <div class="peer-title">
+                      <span class="contact-name">{{ contact.name }}</span>
+                      <span class="tag" :class="{ success: contact.is_online }">
+                        {{ contact.is_online ? '在线' : '离线' }}
+                      </span>
+                    </div>
+                    <p class="muted small">角色：{{ contact.role }}</p>
+                  </div>
+                </button>
+                <div v-if="!availableContacts.length" class="empty muted">
+                  暂无匹配的联系人，可刷新或清空搜索。
+                </div>
+              </div>
+            </div>
+
+            <div class="peer-conversation">
+              <div class="wechat-topbar">
+                <div class="wechat-contact" v-if="selectedPeer">
+                  <div class="wechat-avatar assistant">{{ selectedPeer.name.slice(0, 1) }}</div>
+                  <div>
+                    <p class="contact-name">{{ selectedPeer.name }}</p>
+                    <p class="contact-desc">
+                      {{ selectedPeer.is_online ? '在线，可立即沟通' : '对方离线，可留言' }}
+                    </p>
+                  </div>
+                </div>
+                <div class="wechat-contact" v-else>
+                  <div class="wechat-avatar assistant">?</div>
+                  <div>
+                    <p class="contact-name">选择联系人</p>
+                    <p class="contact-desc">点击左侧列表开始聊天</p>
+                  </div>
+                </div>
+                <div class="wechat-meta">
+                  <span class="meta-chip">消息 {{ peerMessages.length }} 条</span>
+                  <span class="meta-chip" v-if="peerMessagesLoading">加载中...</span>
+                </div>
+              </div>
+
+              <div class="wechat-body peer-body">
+                <div
+                  v-for="msg in peerMessages"
+                  :key="msg.id"
+                  class="wechat-row"
+                  :class="msg.sender_id === currentUser?.id ? 'right' : 'left'"
+                >
+                  <div class="wechat-avatar" :class="msg.sender_id === currentUser?.id ? 'user' : 'assistant'">
+                    {{ msg.sender_id === currentUser?.id ? currentUser?.name?.slice(0, 1) || '我' : msg.sender_name?.slice(0, 1) || 'Ta' }}
+                  </div>
+                  <div class="wechat-bubble" :class="msg.sender_id === currentUser?.id ? 'user' : 'assistant'">
+                    <div class="bubble-meta">
+                      <span class="role-tag">{{ msg.sender_id === currentUser?.id ? '我' : msg.sender_name }}</span>
+                      <span class="bubble-time">{{ new Date(msg.created_at).toLocaleString() }}</span>
+                    </div>
+                    <div class="bubble-body">{{ msg.content }}</div>
+                  </div>
+                </div>
+
+                <div v-if="!peerMessages.length && selectedPeer" class="empty muted">还没有历史记录，开始打个招呼吧。</div>
+                <div v-if="!selectedPeer" class="empty muted">选择联系人后即可开始对话。</div>
+              </div>
+
+              <div class="wechat-composer peer-composer">
+                <textarea
+                  v-model="peerInput"
+                  rows="4"
+                  class="wechat-input"
+                  placeholder="请输入聊天内容，Enter 发送，Shift+Enter 换行"
+                  :disabled="!selectedPeer"
+                  @keyup.enter.exact.prevent="sendPeerMessage"
+                ></textarea>
+                <div class="composer-actions">
+                  <div>
+                    <p class="muted small">聊天对象：{{ selectedPeer?.name || '未选择' }}</p>
+                    <p class="muted small">在线状态：{{ selectedPeer?.is_online ? '在线' : '离线' }}</p>
+                  </div>
+                  <div class="composer-buttons">
+                    <button class="ghost" @click="peerInput = ''" :disabled="!selectedPeer">清空</button>
+                    <button @click="sendPeerMessage" :disabled="peerSending || !selectedPeer">
+                      {{ peerSending ? '发送中...' : '发送' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section class="panel neon-panel wechat-panel" v-if="activeMenu === 'chat'">
           <div class="panel-header">

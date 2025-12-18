@@ -76,6 +76,12 @@ class UserContactPublic(SQLModel):
     role: str
 
 
+class UserContactStatusPublic(UserContactPublic):
+    """带在线状态的联系人信息"""
+
+    is_online: bool
+
+
 class BalanceUpdate(SQLModel):
     """余额调整入参"""
 
@@ -518,12 +524,21 @@ def list_users(session: Session = Depends(get_session), _: User = Depends(requir
     return [UserPublic(id=u.id, name=u.name, balance=u.balance, role=u.role) for u in users]
 
 
-@app.get("/contacts", response_model=List[UserContactPublic])
+@app.get("/contacts", response_model=List[UserContactStatusPublic])
 def list_contacts(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     """获取站内互聊联系人列表，排除当前用户。"""
 
+    online_user_ids = {info.get("user_id") for info in token_store.values() if info.get("user_id")}
     contacts = session.exec(select(User).where(User.id != user.id)).all()
-    return [UserContactPublic(id=item.id, name=item.name, role=item.role) for item in contacts]
+    return [
+        UserContactStatusPublic(
+            id=item.id,
+            name=item.name,
+            role=item.role,
+            is_online=item.id in online_user_ids,
+        )
+        for item in contacts
+    ]
 
 
 @app.get("/users/{user_id}", response_model=UserPublic)
