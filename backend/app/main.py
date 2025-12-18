@@ -17,8 +17,11 @@ try:
 except ImportError:  # pragma: no cover - 在无依赖环境下自动降级
     redis = None  # type: ignore
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from datetime import datetime
+
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import and_, or_
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 
@@ -62,6 +65,14 @@ class UserPublic(SQLModel):
     id: int
     name: str
     balance: float
+    role: str
+
+
+class UserContactPublic(SQLModel):
+    """站内互聊展示的联系人信息"""
+
+    id: int
+    name: str
     role: str
 
 
@@ -174,6 +185,16 @@ class ChatMessage(SQLModel):
     content: str
 
 
+class PeerMessage(SQLModel, table=True):
+    """站内互聊消息表"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    sender_id: int = Field(foreign_key="user.id")
+    receiver_id: int = Field(foreign_key="user.id")
+    content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ChatCompletionRequest(SQLModel):
     """聊天请求参数"""
 
@@ -196,6 +217,25 @@ class ChatCompletionResponse(SQLModel):
     model: str
     choices: List[Dict[str, object]]
     usage: Dict[str, UsageValue]
+
+
+class PeerMessageCreate(SQLModel):
+    """创建站内互聊消息入参"""
+
+    receiver_id: int
+    content: str
+
+
+class PeerMessagePublic(SQLModel):
+    """站内互聊返回体"""
+
+    id: int
+    sender_id: int
+    receiver_id: int
+    sender_name: str
+    receiver_name: str
+    content: str
+    created_at: datetime
 
 
 class UserUpdate(SQLModel):
@@ -478,6 +518,14 @@ def list_users(session: Session = Depends(get_session), _: User = Depends(requir
     return [UserPublic(id=u.id, name=u.name, balance=u.balance, role=u.role) for u in users]
 
 
+@app.get("/contacts", response_model=List[UserContactPublic])
+def list_contacts(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    """获取站内互聊联系人列表，排除当前用户。"""
+
+    contacts = session.exec(select(User).where(User.id != user.id)).all()
+    return [UserContactPublic(id=item.id, name=item.name, role=item.role) for item in contacts]
+
+
 @app.get("/users/{user_id}", response_model=UserPublic)
 def get_user(user_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
     user = session.get(User, user_id)
@@ -527,6 +575,70 @@ def delete_user(user_id: int, session: Session = Depends(get_session), _: User =
     session.commit()
     logging.info("删除用户：%s", user.name)
     return None
+
+
+@app.get("/contacts/messages/{peer_id}", response_model=List[PeerMessagePublic])
+def get_peer_messages(
+    peer_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)
+):
+    peer = session.get(User, peer_id)
+    if not peer:
+        raise HTTPException(status_code=404, detail="联系人不存在")
+
+    query = (
+        select(PeerMessage)
+        .where(
+            or_(
+                and_(PeerMessage.sender_id == user.id, PeerMessage.receiver_id == peer_id),
+                and_(PeerMessage.sender_id == peer_id, PeerMessage.receiver_id == user.id),
+            )
+        )
+        .order_by(PeerMessage.created_at)
+    )
+    messages = session.exec(query).all()
+    return [
+        PeerMessagePublic(
+            id=msg.id,
+            sender_id=msg.sender_id,
+            receiver_id=msg.receiver_id,
+            sender_name=peer.name if msg.sender_id == peer.id else user.name,
+            receiver_name=peer.name if msg.receiver_id == peer.id else user.name,
+            content=msg.content,
+            created_at=msg.created_at,
+        )
+        for msg in messages
+    ]
+
+
+@app.post("/contacts/messages", response_model=PeerMessagePublic, status_code=status.HTTP_201_CREATED)
+def create_peer_message(
+    payload: PeerMessageCreate,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    content = payload.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="内容不能为空")
+    if payload.receiver_id == user.id:
+        raise HTTPException(status_code=400, detail="不能给自己发送消息")
+
+    receiver = session.get(User, payload.receiver_id)
+    if not receiver:
+        raise HTTPException(status_code=404, detail="联系人不存在")
+
+    message = PeerMessage(sender_id=user.id, receiver_id=payload.receiver_id, content=content)
+    session.add(message)
+    session.commit()
+    session.refresh(message)
+    return PeerMessagePublic(
+        id=message.id,
+        sender_id=message.sender_id,
+        receiver_id=message.receiver_id,
+        sender_name=user.name,
+        receiver_name=receiver.name,
+        content=message.content,
+        created_at=message.created_at,
+    )
 
 
 @app.put("/users/{user_id}/balance", response_model=UserPublic)

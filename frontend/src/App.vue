@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://10.30.79.140:8001'
 
@@ -32,6 +32,12 @@ const editingRolePrompt = ref(null)
 const chatMessages = ref([])
 const chatInput = ref('')
 const chatModelId = ref(null)
+const contacts = ref([])
+const peerMessages = ref([])
+const selectedPeerId = ref(null)
+const peerInput = ref('')
+const peerSending = ref(false)
+const peerMessagesLoading = ref(false)
 const defaultRolePrompt = '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
 
 const modals = ref({
@@ -88,6 +94,10 @@ const currentRolePrompt = computed(() => {
   if (target) return target.prompt
   return defaultRolePrompt
 })
+const availableContacts = computed(() =>
+  contacts.value.filter((item) => item.id !== currentUser.value?.id).sort((a, b) => a.name.localeCompare(b.name))
+)
+const selectedPeer = computed(() => availableContacts.value.find((item) => item.id === selectedPeerId.value) || null)
 
 function setStatus(type, message) {
   status.value = { type, message }
@@ -110,6 +120,10 @@ function clearAuth() {
   currentUser.value = null
   rolePrompts.value = []
   selectedRoleId.value = null
+  contacts.value = []
+  peerMessages.value = []
+  selectedPeerId.value = null
+  peerInput.value = ''
   localStorage.removeItem('token')
   localStorage.removeItem('user')
 }
@@ -237,6 +251,38 @@ async function fetchLogs() {
   logs.value = res.lines || []
 }
 
+async function fetchContacts() {
+  if (!isAuthed.value) {
+    contacts.value = []
+    return
+  }
+  try {
+    contacts.value = await request('/contacts')
+    if (!selectedPeerId.value && contacts.value.length) {
+      selectedPeerId.value = contacts.value[0].id
+    }
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function fetchPeerMessages(peerId) {
+  if (!peerId) return
+  peerMessagesLoading.value = true
+  try {
+    peerMessages.value = await request(`/contacts/messages/${peerId}`)
+  } catch (error) {
+    setStatus('error', error.message)
+  } finally {
+    peerMessagesLoading.value = false
+  }
+}
+
+async function openPeerChat(contact) {
+  selectedPeerId.value = contact.id
+  await fetchPeerMessages(contact.id)
+}
+
 async function syncAll() {
   loading.value = true
   try {
@@ -249,6 +295,7 @@ async function syncAll() {
       fetchRoles(),
       fetchRolePrompts(),
       fetchLogs(),
+      fetchContacts(),
     ])
     setStatus('success', '数据已同步')
   } catch (error) {
@@ -304,6 +351,10 @@ async function handleLogout() {
   selectedRoleId.value = null
   chatMessages.value = []
   chatInput.value = ''
+  contacts.value = []
+  peerMessages.value = []
+  selectedPeerId.value = null
+  peerInput.value = ''
   dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
 }
 
@@ -671,6 +722,42 @@ function resetChat() {
   chatInput.value = ''
 }
 
+async function sendPeerMessage() {
+  if (!selectedPeerId.value) {
+    setStatus('error', '请先选择联系人')
+    return
+  }
+  if (!peerInput.value.trim()) {
+    setStatus('error', '请输入要发送的内容')
+    return
+  }
+  const content = peerInput.value.trim()
+  peerSending.value = true
+  try {
+    const res = await request('/contacts/messages', {
+      method: 'POST',
+      body: JSON.stringify({ receiver_id: selectedPeerId.value, content }),
+    })
+    peerMessages.value.push(res)
+    peerInput.value = ''
+  } catch (error) {
+    setStatus('error', error.message)
+  } finally {
+    peerSending.value = false
+  }
+}
+
+watch(
+  () => selectedPeerId.value,
+  (peerId) => {
+    if (peerId) {
+      fetchPeerMessages(peerId)
+    } else {
+      peerMessages.value = []
+    }
+  }
+)
+
 onMounted(() => {
   if (token.value) {
     syncAll()
@@ -743,87 +830,211 @@ onMounted(() => {
       <template v-else>
         <section v-if="loading" class="loading-banner">正在加载...</section>
 
-        <section class="panel neon-panel" v-if="activeMenu === 'chat'">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">星际对话</p>
-                <h3>大模型聊天舱</h3>
-              </div>
-              <div class="header-actions">
+        <section class="panel neon-panel wechat-panel" v-if="activeMenu === 'chat'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">微信风格对话</p>
+              <h3>对话面板 · 沉浸式气泡</h3>
+            </div>
+            <div class="header-actions wechat-toolbar">
+              <div class="toolbar-field">
+                <label>角色预设</label>
                 <select v-model="selectedRoleId" class="inline-input">
                   <option v-for="prompt in rolePrompts" :key="prompt.id" :value="prompt.id">
                     {{ prompt.name }}
                   </option>
                   <option v-if="!rolePrompts.length" :value="null">默认提示词</option>
                 </select>
-                <button class="outline" v-if="isAdmin" @click="modals.rolePrompt = true">新增提示词</button>
+              </div>
+              <div class="toolbar-field">
+                <label>使用模型</label>
                 <select v-model="chatModelId" class="inline-input" :disabled="!models.length">
                   <option v-for="model in models" :key="model.id" :value="model.id">{{ model.name }}</option>
                 </select>
-                <button class="outline" @click="resetChat">清空历史</button>
               </div>
+              <div class="toolbar-buttons">
+                <button class="outline" @click="resetChat">清空历史</button>
+                <button class="outline" v-if="isAdmin" @click="modals.rolePrompt = true">新增提示词</button>
+              </div>
+            </div>
           </div>
-          <div class="chat-grid">
-              <div class="chat-log">
+
+          <div class="wechat-chat">
+            <div class="wechat-window">
+              <div class="wechat-topbar">
+                <div class="wechat-contact">
+                  <div class="wechat-avatar">{{ currentChatModel?.name?.slice(0, 1) || '星' }}</div>
+                  <div>
+                    <p class="contact-name">{{ currentChatModel?.name || '星链助手' }}</p>
+                    <p class="contact-desc">
+                      {{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }} · 双击 Enter 换行
+                    </p>
+                  </div>
+                </div>
+                <div class="wechat-meta">
+                  <span class="meta-chip">上下文 {{ chatMessages.length }} 条</span>
+                  <span class="meta-chip" v-if="chatLoading">正在生成...</span>
+                </div>
+              </div>
+
+              <div class="wechat-body">
                 <div
                   v-for="(msg, index) in chatMessages"
                   :key="index"
-                  class="chat-bubble"
-                :class="msg.role === 'assistant' ? 'assistant' : 'user'"
-              >
-                <div class="bubble-meta">
-                  <span class="role-tag">{{ msg.role === 'assistant' ? 'AI 导航' : '我' }}</span>
-                  <button class="icon ghost" @click="deleteChatMessage(index)" title="删除这条记录">×</button>
+                  class="wechat-row"
+                  :class="msg.role === 'assistant' ? 'left' : 'right'"
+                >
+                  <div class="wechat-avatar" :class="msg.role === 'assistant' ? 'assistant' : 'user'">
+                    {{ msg.role === 'assistant' ? 'AI' : (currentUser?.name?.slice(0, 1) || '我') }}
+                  </div>
+                  <div class="wechat-bubble" :class="msg.role === 'assistant' ? 'assistant' : 'user'">
+                    <div class="bubble-meta">
+                      <span class="role-tag">{{ msg.role === 'assistant' ? '星链助手' : '我' }}</span>
+                      <button class="icon ghost" @click="deleteChatMessage(index)" title="删除这条记录">×</button>
+                    </div>
+                    <div class="bubble-body" v-html="renderMarkdown(msg.content)"></div>
+                  </div>
                 </div>
-                  <div class="bubble-body" v-html="renderMarkdown(msg.content)"></div>
-                </div>
+
                 <div v-if="!chatMessages.length" class="empty muted">还没有对话记录，发送后会自动携带上下文。</div>
                 <div v-if="chatLoading" class="chat-loading-hint">
                   <span class="spinner"></span>
                   <span>AI 正在生成回答，请稍候...</span>
                 </div>
               </div>
-              <div class="chat-composer">
+
+              <div class="wechat-composer">
                 <textarea
                   v-model="chatInput"
-                rows="5"
-                class="chat-input"
-                placeholder="描述你的任务、提问或贴上一段代码片段..."
-                @keyup.enter.exact.prevent="sendChat"
+                  rows="5"
+                  class="wechat-input"
+                  placeholder="仿微信气泡体验：输入问题或需求，Enter 发送，Shift+Enter 换行"
+                  @keyup.enter.exact.prevent="sendChat"
                 ></textarea>
                 <div class="composer-actions">
                   <div>
-                    <p class="muted small">使用 Markdown 渲染，历史消息随请求自动附带。</p>
-                    <p class="muted small">当前模型：{{ currentChatModel?.name || '未选择' }}</p>
-                    <p class="muted small">
-                      当前角色：{{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }}
-                    </p>
+                    <p class="muted small">Markdown 渲染友好，历史自动拼接。</p>
+                    <p class="muted small">当前角色：{{ rolePrompts.find((item) => item.id === selectedRoleId)?.name || '默认提示词' }}</p>
                   </div>
-                  <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送星链' }}</button>
+                  <div class="composer-buttons">
+                    <button class="ghost" @click="resetChat">重置</button>
+                    <button @click="sendChat" :disabled="chatLoading">{{ chatLoading ? '正在生成' : '发送' }}</button>
+                  </div>
                 </div>
               </div>
             </div>
-            <div class="table-wrapper" v-if="rolePrompts.length">
-              <table class="table compact">
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>提示词</th>
-                    <th v-if="isAdmin">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in rolePrompts" :key="item.id">
-                    <td>{{ item.name }}</td>
-                    <td>{{ item.prompt }}</td>
-                    <td v-if="isAdmin" class="row-actions">
-                      <button class="ghost" @click="openEditRolePrompt(item)">编辑</button>
-                      <button class="ghost danger" @click="deleteRolePrompt(item.id)">删除</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          </div>
+
+          <div class="peer-chat-panel">
+            <div class="peer-header">
+              <div>
+                <p class="eyebrow">站内私聊</p>
+                <h3>用户互聊 · 跟进需求</h3>
+              </div>
+              <div class="peer-actions">
+                <span class="meta-chip">联系人 {{ availableContacts.length }} 位</span>
+                <button class="outline" @click="fetchContacts" :disabled="!isAuthed">刷新联系人</button>
+              </div>
             </div>
+            <div class="peer-layout">
+              <aside class="peer-list">
+                <button
+                  v-for="contact in availableContacts"
+                  :key="contact.id"
+                  class="peer-item"
+                  :class="{ active: contact.id === selectedPeerId }"
+                  @click="openPeerChat(contact)"
+                >
+                  <div class="peer-avatar">{{ contact.name.slice(0, 1).toUpperCase() }}</div>
+                  <div class="peer-meta">
+                    <div class="peer-name">{{ contact.name }}</div>
+                    <div class="peer-role">{{ contact.role }}</div>
+                  </div>
+                </button>
+                <div v-if="!availableContacts.length" class="empty muted small">
+                  暂无联系人，需管理员创建用户后使用。
+                </div>
+              </aside>
+              <div class="peer-window" :class="{ empty: !selectedPeer }">
+                <div class="peer-window-header">
+                  <div>
+                    <p class="eyebrow">{{ selectedPeer ? '与 ' + selectedPeer.name + ' 的对话' : '请选择联系人' }}</p>
+                    <h4 class="peer-title">{{ selectedPeer?.name || '站内互聊' }}</h4>
+                  </div>
+                  <div class="peer-window-actions">
+                    <span class="meta-chip" v-if="selectedPeer">{{ peerMessages.length }} 条消息</span>
+                    <span class="meta-chip" v-if="peerMessagesLoading">同步中...</span>
+                  </div>
+                </div>
+                <div class="peer-body">
+                  <template v-if="selectedPeer">
+                    <div v-for="item in peerMessages" :key="item.id" class="wechat-row" :class="item.sender_id === currentUser?.id ? 'right' : 'left'">
+                      <div class="wechat-avatar" :class="item.sender_id === currentUser?.id ? 'user' : 'assistant'">
+                        {{ item.sender_id === currentUser?.id ? (currentUser?.name?.slice(0, 1) || '我') : selectedPeer.name.slice(0, 1) }}
+                      </div>
+                      <div class="wechat-bubble" :class="item.sender_id === currentUser?.id ? 'user' : 'assistant'">
+                        <div class="bubble-meta">
+                          <span class="role-tag">{{ item.sender_id === currentUser?.id ? '我' : item.sender_name }}</span>
+                          <span class="muted small">{{ new Date(item.created_at).toLocaleString() }}</span>
+                        </div>
+                        <div class="bubble-body" v-html="renderMarkdown(item.content)"></div>
+                      </div>
+                    </div>
+                    <div v-if="!peerMessages.length && !peerMessagesLoading" class="empty muted small">
+                      还没有消息，发送后即可实时记录。
+                    </div>
+                    <div v-if="peerMessagesLoading" class="chat-loading-hint">
+                      <span class="spinner"></span>
+                      <span>正在同步消息...</span>
+                    </div>
+                  </template>
+                  <div v-else class="empty muted">请选择一位联系人开始聊天。</div>
+                </div>
+                <div class="peer-composer">
+                  <textarea
+                    v-model="peerInput"
+                    class="wechat-input"
+                    rows="3"
+                    :disabled="!selectedPeer || peerSending"
+                    placeholder="输入要发送给对方的消息，Enter 发送，Shift+Enter 换行"
+                    @keyup.enter.exact.prevent="sendPeerMessage"
+                  ></textarea>
+                  <div class="composer-actions">
+                    <p class="muted small">仅站内用户可见，消息按时间排序展示。</p>
+                    <div class="composer-buttons">
+                      <button class="ghost" @click="peerInput = ''" :disabled="!selectedPeer">清空输入</button>
+                      <button @click="sendPeerMessage" :disabled="peerSending || !selectedPeer">
+                        {{ peerSending ? '发送中' : '发送消息' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-wrapper" v-if="rolePrompts.length">
+            <div class="table-title">角色提示词库</div>
+            <table class="table compact">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>提示词</th>
+                  <th v-if="isAdmin">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in rolePrompts" :key="item.id">
+                  <td>{{ item.name }}</td>
+                  <td>{{ item.prompt }}</td>
+                  <td v-if="isAdmin" class="row-actions">
+                    <button class="ghost" @click="openEditRolePrompt(item)">编辑</button>
+                    <button class="ghost danger" @click="deleteRolePrompt(item.id)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section class="panel-grid" v-if="activeMenu === 'home'">
