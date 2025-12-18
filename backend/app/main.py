@@ -308,6 +308,93 @@ class RoleUpdate(SQLModel):
     role: Role
 
 
+class JobAutomationConfig(SQLModel, table=True):
+    """get_jobs 服务集成配置"""
+
+    id: Optional[int] = Field(default=1, primary_key=True)
+    service_url: str = Field(default="", description="get_jobs 服务接收任务的地址")
+    service_token: Optional[str] = Field(default=None, description="get_jobs 服务鉴权 token，可选")
+    resume_link: Optional[str] = Field(default=None, description="简历链接或存储地址")
+    greeting: str = Field(
+        default="您好，我对岗位很感兴趣，这是我的简历，期待沟通。",
+        description="开场白模板",
+    )
+    keywords: str = Field(default="", description="投递关键词，逗号分隔")
+    cities: str = Field(default="", description="城市列表，逗号分隔")
+    auto_apply: bool = Field(default=True, description="是否自动投递")
+    auto_greet: bool = Field(default=True, description="是否自动打招呼")
+    daily_limit: int = Field(default=30, description="每日最大投递数量")
+
+
+class JobAutomationConfigPublic(SQLModel):
+    id: int
+    service_url: str
+    service_token: Optional[str]
+    resume_link: Optional[str]
+    greeting: str
+    keywords: str
+    cities: str
+    auto_apply: bool
+    auto_greet: bool
+    daily_limit: int
+
+
+class JobAutomationConfigUpdate(SQLModel):
+    service_url: Optional[str] = None
+    service_token: Optional[str] = None
+    resume_link: Optional[str] = None
+    greeting: Optional[str] = None
+    keywords: Optional[str] = None
+    cities: Optional[str] = None
+    auto_apply: Optional[bool] = None
+    auto_greet: Optional[bool] = None
+    daily_limit: Optional[int] = None
+
+
+class JobRun(SQLModel, table=True):
+    """投递任务执行记录"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    status: str = Field(default="pending")
+    message: str = Field(default="")
+    requested_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+    requested_by: int
+    keywords: Optional[str] = None
+    cities: Optional[str] = None
+    resume_link: Optional[str] = None
+    greeting: Optional[str] = None
+    auto_apply: Optional[bool] = None
+    auto_greet: Optional[bool] = None
+    daily_limit: Optional[int] = None
+
+
+class JobRunPublic(SQLModel):
+    id: int
+    status: str
+    message: str
+    requested_at: datetime
+    finished_at: Optional[datetime]
+    requested_by: int
+    keywords: Optional[str]
+    cities: Optional[str]
+    resume_link: Optional[str]
+    greeting: Optional[str]
+    auto_apply: Optional[bool]
+    auto_greet: Optional[bool]
+    daily_limit: Optional[int]
+
+
+class JobRunRequest(SQLModel):
+    keywords: Optional[str] = None
+    cities: Optional[str] = None
+    resume_link: Optional[str] = None
+    greeting: Optional[str] = None
+    auto_apply: Optional[bool] = None
+    auto_greet: Optional[bool] = None
+    daily_limit: Optional[int] = None
+
+
 sqlite_url = "sqlite:///./data.db"
 engine = create_engine(sqlite_url, echo=False, connect_args={"check_same_thread": False})
 
@@ -501,6 +588,60 @@ def get_user_by_token(token: str, session: Session) -> User:
     return user
 
 
+def get_job_config(session: Session) -> JobAutomationConfig:
+    config = session.get(JobAutomationConfig, 1)
+    if config:
+        return config
+    config = JobAutomationConfig()
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+    return config
+
+
+def merge_job_config(config: JobAutomationConfig, payload: JobRunRequest) -> JobRunRequest:
+    return JobRunRequest(
+        keywords=payload.keywords if payload.keywords is not None else config.keywords,
+        cities=payload.cities if payload.cities is not None else config.cities,
+        resume_link=payload.resume_link if payload.resume_link is not None else config.resume_link,
+        greeting=payload.greeting if payload.greeting is not None else config.greeting,
+        auto_apply=payload.auto_apply if payload.auto_apply is not None else config.auto_apply,
+        auto_greet=payload.auto_greet if payload.auto_greet is not None else config.auto_greet,
+        daily_limit=payload.daily_limit if payload.daily_limit is not None else config.daily_limit,
+    )
+
+
+def call_get_jobs(
+    *,
+    config: JobAutomationConfig,
+    merged: JobRunRequest,
+) -> str:
+    if not config.service_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先配置 get_jobs 服务地址")
+
+    headers = {"Content-Type": "application/json"}
+    if config.service_token:
+        headers["Authorization"] = f"Bearer {config.service_token}"
+
+    payload = {
+        "keywords": merged.keywords,
+        "cities": merged.cities,
+        "resume_link": merged.resume_link,
+        "greeting": merged.greeting,
+        "auto_apply": merged.auto_apply,
+        "auto_greet": merged.auto_greet,
+        "daily_limit": merged.daily_limit,
+    }
+
+    try:
+        response = httpx.post(config.service_url, json=payload, headers=headers, timeout=30.0)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:  # pragma: no cover - 外部服务不易模拟
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"get_jobs 调用失败：{exc}") from exc
+
+    return response.text[:500]
+
+
 # -----------------------------
 # WebSocket 路由（新增）
 # -----------------------------
@@ -508,14 +649,22 @@ def get_user_by_token(token: str, session: Session) -> User:
 async def ws_endpoint(ws: WebSocket):
     token = ws.query_params.get("token")
     if not token:
-        await ws.close(code=1008)
+        # 兼容部分客户端无法携带查询参数时的头部传递
+        auth_header = ws.headers.get("Authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header.split()[1]
+
+    if not token:
+        await ws.accept()
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="缺少 token")
         return
 
     with Session(engine) as session:
         try:
             user = get_user_by_token(token, session)
-        except HTTPException:
-            await ws.close(code=1008)
+        except HTTPException as exc:
+            await ws.accept()
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason=exc.detail)
             return
 
         await ws_manager.connect(user.id, ws)
@@ -945,7 +1094,9 @@ def create_chat_completion(payload: ChatCompletionRequest, session: Session = De
                         json=request_body,
                     ) as upstream_response:
                         if upstream_response.status_code >= 400:
-                            error_text = upstream_response.text
+                            # 主动读取完整响应，避免 httpx 在流模式下抛出 ResponseNotRead
+                            error_bytes = upstream_response.read()
+                            error_text = error_bytes.decode("utf-8", errors="replace")
                             try:
                                 error_body = upstream_response.json()
                                 error_text = error_body.get("error", {}).get("message", error_text)
@@ -1193,3 +1344,74 @@ def dashboard(request: Request, session: Session = Depends(get_session), _: User
         "ip": client_ip,
         "weather": weather,
     }
+
+
+@app.get("/job-helper/config", response_model=JobAutomationConfigPublic)
+def get_job_helper_config(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    return get_job_config(session)
+
+
+@app.put("/job-helper/config", response_model=JobAutomationConfigPublic)
+def update_job_helper_config(
+    payload: JobAutomationConfigUpdate,
+    session: Session = Depends(get_session),
+    _: User = Depends(require_admin),
+):
+    config = get_job_config(session)
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(config, field, value)
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+    return config
+
+
+@app.post("/job-helper/run", response_model=JobRunPublic)
+def trigger_job_helper(
+    payload: JobRunRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    config = get_job_config(session)
+    merged = merge_job_config(config, payload)
+
+    job_run = JobRun(
+        status="pending",
+        message="正在提交到 get_jobs...",
+        requested_by=user.id,
+        keywords=merged.keywords,
+        cities=merged.cities,
+        resume_link=merged.resume_link,
+        greeting=merged.greeting,
+        auto_apply=merged.auto_apply,
+        auto_greet=merged.auto_greet,
+        daily_limit=merged.daily_limit,
+    )
+    session.add(job_run)
+    session.commit()
+    session.refresh(job_run)
+
+    try:
+        reply_text = call_get_jobs(config=config, merged=merged)
+        job_run.status = "success"
+        job_run.message = reply_text or "提交成功"
+    except HTTPException as exc:
+        job_run.status = "failed"
+        job_run.message = str(exc.detail)
+        job_run.finished_at = datetime.utcnow()
+        session.add(job_run)
+        session.commit()
+        session.refresh(job_run)
+        raise
+
+    job_run.finished_at = datetime.utcnow()
+    session.add(job_run)
+    session.commit()
+    session.refresh(job_run)
+    return job_run
+
+
+@app.get("/job-helper/runs", response_model=List[JobRunPublic])
+def list_job_runs(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    statement = select(JobRun).order_by(JobRun.requested_at.desc()).limit(50)
+    return list(session.exec(statement))
