@@ -207,6 +207,8 @@ function switchTheme(mode) {
 
 function toggleChristmas() {
   christmasActive.value = !christmasActive.value
+  if (christmasActive.value) startChristmasEffects()
+  else stopChristmasEffects()
 }
 
 async function request(path, options = {}) {
@@ -1050,14 +1052,6 @@ watch(
     applyThemeClasses()
   },
   { immediate: true }
-)
-
-watch(
-  () => christmasActive.value,
-  (val) => {
-    if (val) startChristmasEffects()
-    else stopChristmasEffects()
-  }
 )
 
 watch(
