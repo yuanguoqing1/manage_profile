@@ -945,7 +945,9 @@ def create_chat_completion(payload: ChatCompletionRequest, session: Session = De
                         json=request_body,
                     ) as upstream_response:
                         if upstream_response.status_code >= 400:
-                            error_text = upstream_response.text
+                            # 主动读取完整响应，避免 httpx 在流模式下抛出 ResponseNotRead
+                            error_bytes = upstream_response.read()
+                            error_text = error_bytes.decode("utf-8", errors="replace")
                             try:
                                 error_body = upstream_response.json()
                                 error_text = error_body.get("error", {}).get("message", error_text)
