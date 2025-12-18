@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://10.30.79.140:8001'
 
@@ -7,6 +7,8 @@ const loading = ref(false)
 const chatLoading = ref(false)
 const status = ref({ type: '', message: '' })
 const activeMenu = ref('home')
+const themeMode = ref(localStorage.getItem('themeMode') || 'dark')
+const christmasActive = ref(false)
 
 const token = ref(localStorage.getItem('token') || '')
 const currentUser = ref(JSON.parse(localStorage.getItem('user') || 'null'))
@@ -95,6 +97,16 @@ const forms = ref({
   editRolePrompt: { id: null, name: '', prompt: '' },
 })
 
+const reportTrend = ref([52, 66, 48, 72, 95, 88, 76, 110, 90, 130])
+const registerTrend = ref([8, 16, 20, 12, 18, 26, 24])
+const trafficSources = ref([
+  { country: '中国', city: '北京', users: 320, x: 68, y: 38 },
+  { country: '美国', city: '旧金山', users: 190, x: 24, y: 44 },
+  { country: '德国', city: '柏林', users: 120, x: 50, y: 36 },
+  { country: '新加坡', city: '新加坡', users: 150, x: 71, y: 63 },
+  { country: '澳大利亚', city: '悉尼', users: 90, x: 80, y: 78 },
+])
+
 const isAuthed = computed(() => Boolean(token.value))
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const currentChatModel = computed(() => models.value.find((m) => m.id === chatModelId.value))
@@ -104,6 +116,8 @@ const currentRolePrompt = computed(() => {
   if (target) return target.prompt
   return defaultRolePrompt
 })
+
+const isDarkMode = computed(() => themeMode.value === 'dark')
 
 const availableContacts = computed(() => {
   const keyword = contactSearch.value.trim().toLowerCase()
@@ -176,6 +190,109 @@ function renderMarkdown(content) {
     .map((part) => part.replace(/\n/g, '<br />'))
     .join('</p><p>')
   return `<p>${paragraphs}</p>`
+}
+
+const snowState = {
+  canvas: null,
+  context: null,
+  rafId: null,
+  flakes: [],
+  resizeHandler: null,
+}
+
+function applyThemeClasses() {
+  const root = document.documentElement
+  if (!root) return
+  root.classList.toggle('dark-mode', themeMode.value === 'dark')
+  root.classList.toggle('light-mode', themeMode.value === 'light')
+  root.classList.toggle('christmas-grayscale', christmasActive.value)
+}
+
+function switchTheme(mode) {
+  themeMode.value = mode
+  localStorage.setItem('themeMode', mode)
+}
+
+function initSnowFlakes() {
+  if (!snowState.canvas || !snowState.context) return
+  const { innerWidth, innerHeight } = window
+  snowState.canvas.width = innerWidth
+  snowState.canvas.height = innerHeight
+  snowState.flakes = Array.from({ length: Math.min(160, Math.max(80, Math.floor(innerWidth / 10))) }, () => ({
+    x: Math.random() * innerWidth,
+    y: Math.random() * innerHeight,
+    r: Math.random() * 3 + 1,
+    d: Math.random() * 1 + 0.5,
+  }))
+}
+
+function drawSnow() {
+  if (!snowState.context || !snowState.canvas) return
+  const ctx = snowState.context
+  const w = snowState.canvas.width
+  const h = snowState.canvas.height
+  ctx.clearRect(0, 0, w, h)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
+  ctx.beginPath()
+  snowState.flakes.forEach((flake) => {
+    ctx.moveTo(flake.x, flake.y)
+    ctx.arc(flake.x, flake.y, flake.r, 0, Math.PI * 2, true)
+  })
+  ctx.fill()
+
+  snowState.flakes = snowState.flakes.map((flake) => {
+    let { x, y, r, d } = flake
+    y += d
+    x += Math.sin(d * 2) * 0.5
+    if (y > h) {
+      y = -10
+      x = Math.random() * w
+    }
+    return { x, y, r, d }
+  })
+
+  snowState.rafId = requestAnimationFrame(drawSnow)
+}
+
+function startChristmasSnow() {
+  if (snowState.canvas) return
+  const canvas = document.createElement('canvas')
+  canvas.id = 'christmas-snow'
+  canvas.style.position = 'fixed'
+  canvas.style.pointerEvents = 'none'
+  canvas.style.top = '0'
+  canvas.style.left = '0'
+  canvas.style.width = '100vw'
+  canvas.style.height = '100vh'
+  canvas.style.zIndex = '999'
+  document.body.appendChild(canvas)
+  snowState.canvas = canvas
+  snowState.context = canvas.getContext('2d')
+  snowState.resizeHandler = () => initSnowFlakes()
+  window.addEventListener('resize', snowState.resizeHandler)
+  initSnowFlakes()
+  drawSnow()
+}
+
+function stopChristmasSnow() {
+  if (!snowState.canvas) return
+  if (snowState.rafId) cancelAnimationFrame(snowState.rafId)
+  if (snowState.resizeHandler) window.removeEventListener('resize', snowState.resizeHandler)
+  snowState.canvas.remove()
+  snowState.canvas = null
+  snowState.context = null
+  snowState.flakes = []
+  snowState.rafId = null
+}
+
+function toggleChristmas() {
+  christmasActive.value = !christmasActive.value
+  if (christmasActive.value) {
+    startChristmasSnow()
+  } else {
+    stopChristmasSnow()
+  }
+  applyThemeClasses()
 }
 
 async function request(path, options = {}) {
@@ -1014,6 +1131,23 @@ function connectWs() {
 // 生命周期 & watch
 // ---------------------------
 watch(
+  () => themeMode.value,
+  () => {
+    applyThemeClasses()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => christmasActive.value,
+  (val) => {
+    if (val) startChristmasSnow()
+    else stopChristmasSnow()
+    applyThemeClasses()
+  }
+)
+
+watch(
   () => selectedPeerId.value,
   (peerId) => {
     if (peerId) {
@@ -1034,15 +1168,21 @@ watch(
 )
 
 onMounted(() => {
+  applyThemeClasses()
   if (token.value) {
     syncAll()
     connectWs()
   }
 })
+
+onBeforeUnmount(() => {
+  stopChristmasSnow()
+})
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="[themeMode, { 'christmas-on': christmasActive }]"><!--
+    圣诞按钮触发黑白模式与飘雪效果，主题类用于切换深浅色。-->
     <aside class="sidebar">
       <div class="brand">
         <div class="logo">PM</div>
@@ -1089,6 +1229,11 @@ onMounted(() => {
           <h1>数据面板 · 精准分区</h1>
         </div>
         <div class="top-actions">
+          <button class="ghost" @click="toggleChristmas">
+            {{ christmasActive ? '取消圣诞黑白' : '圣诞黑白' }}
+          </button>
+          <button class="ghost" @click="switchTheme('light')" :disabled="themeMode === 'light'">白天模式</button>
+          <button class="ghost" @click="switchTheme('dark')" :disabled="themeMode === 'dark'">黑暗模式</button>
           <button class="ghost" @click="syncAll" :disabled="!isAuthed || loading">刷新</button>
           <template v-if="!isAuthed">
             <button @click="modals.login = true">登录</button>
@@ -1392,31 +1537,173 @@ onMounted(() => {
         </section>
 
         <!-- 首页 -->
-        <section class="panel-grid" v-if="activeMenu === 'home'">
-          <div class="panel stat">
-            <p class="label">Redis 注册数</p>
-            <h2>{{ dashboard.redis.register_count }}</h2>
-            <p class="muted">历史注册总量</p>
+        <section class="report-section" v-if="activeMenu === 'home'">
+          <div class="report-row stats-row">
+            <div class="report-card stat-card">
+              <div class="card-title">新增注册人数</div>
+              <div class="card-value">{{ dashboard.redis.register_count }}</div>
+              <p class="muted">实时同步 Redis 注册计数</p>
+              <div class="mini-bars">
+                <span
+                  v-for="(value, idx) in registerTrend"
+                  :key="`reg-${idx}`"
+                  class="bar"
+                  :style="{ height: `${Math.max(30, value * 3)}%` }"
+                ></span>
+              </div>
+            </div>
+            <div class="report-card stat-card">
+              <div class="card-title">在线人数</div>
+              <div class="card-value">{{ dashboard.redis.online_count }}</div>
+              <p class="muted">活跃会话实时态势</p>
+              <div class="pill-row">
+                <span class="pill success">高并发守护</span>
+                <span class="pill outline">低延迟</span>
+              </div>
+            </div>
+            <div class="report-card stat-card">
+              <div class="card-title">时间 / 天气</div>
+              <div class="card-value">{{ dashboard.date || '-' }}</div>
+              <p class="muted">{{ dashboard.weather || '晴朗' }}</p>
+              <div class="pill-row">
+                <span class="pill">本地时间</span>
+                <span class="pill">实时气象</span>
+              </div>
+            </div>
+            <div class="report-card stat-card">
+              <div class="card-title">来源 IP</div>
+              <div class="card-value">{{ dashboard.ip || '-' }}</div>
+              <p class="muted">请求入口定位</p>
+              <div class="pill-row">
+                <span class="pill outline">安全审计</span>
+              </div>
+            </div>
           </div>
-          <div class="panel stat">
-            <p class="label">在线人数</p>
-            <h2>{{ dashboard.redis.online_count }}</h2>
-            <p class="muted">实时在线</p>
+
+          <div class="report-row main-row">
+            <div class="report-card radar-card">
+              <div class="card-head">
+                <div>
+                  <p class="eyebrow">运行态势</p>
+                  <h3>实时容量镜像</h3>
+                </div>
+                <span class="meta-chip">圣诞黑白一键触发</span>
+              </div>
+              <div class="radar-wrap">
+                <div class="radar-core">
+                  <div class="radar-ring"></div>
+                  <div class="radar-ring small"></div>
+                  <div class="radar-dot"></div>
+                  <div class="radar-value">{{ dashboard.redis.online_count }}</div>
+                  <p class="radar-desc">在线用户</p>
+                </div>
+                <div class="radar-meta">
+                  <p>注册：{{ dashboard.redis.register_count }}</p>
+                  <p>天气：{{ dashboard.weather || '晴朗' }}</p>
+                  <p>IP：{{ dashboard.ip || '-' }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="report-card trend-card">
+              <div class="card-head">
+                <div>
+                  <p class="eyebrow">业务增长</p>
+                  <h3>请求与在线走势</h3>
+                </div>
+                <span class="meta-chip">近 10 组</span>
+              </div>
+              <div class="line-chart">
+                <div
+                  v-for="(value, idx) in reportTrend"
+                  :key="`trend-${idx}`"
+                  class="line-bar"
+                  :style="{ height: `${Math.min(140, value)}px` }"
+                >
+                  <span class="dot"></span>
+                  <span class="bar-label">{{ value }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="report-card circle-card">
+              <div class="card-head">
+                <div>
+                  <p class="eyebrow">资源占比</p>
+                  <h3>模型与角色</h3>
+                </div>
+                <span class="meta-chip">健康</span>
+              </div>
+              <div class="circle-wrap">
+                <div class="progress-circle">{{ models.length }}</div>
+                <p class="muted">已配置模型</p>
+                <div class="progress-circle alt">{{ rolePrompts.length || 0 }}</div>
+                <p class="muted">预设提示词</p>
+              </div>
+            </div>
           </div>
-          <div class="panel stat">
-            <p class="label">当前时间</p>
-            <h2>{{ dashboard.date || '-' }}</h2>
-            <p class="muted">本地服务器时间</p>
-          </div>
-          <div class="panel stat">
-            <p class="label">IP 信息</p>
-            <h2>{{ dashboard.ip || '-' }}</h2>
-            <p class="muted">请求来源</p>
-          </div>
-          <div class="panel stat">
-            <p class="label">天气</p>
-            <h2>{{ dashboard.weather || '晴朗' }}</h2>
-            <p class="muted">简易天气展示</p>
+
+          <div class="report-row map-row">
+            <div class="report-card map-card">
+              <div class="card-head">
+                <div>
+                  <p class="eyebrow">人数来源</p>
+                  <h3>全球点亮分布</h3>
+                </div>
+                <span class="meta-chip">活跃地区 {{ trafficSources.length }}</span>
+              </div>
+              <div class="map-board">
+                <div class="map-silhouette"></div>
+                <div class="map-dots">
+                  <span
+                    v-for="item in trafficSources"
+                    :key="item.country"
+                    class="map-dot"
+                    :style="{ left: `${item.x}%`, top: `${item.y}%` }"
+                    :title="`${item.country} · ${item.city}`"
+                  ></span>
+                </div>
+              </div>
+              <ul class="source-list">
+                <li v-for="item in trafficSources" :key="item.country">
+                  <span class="strong">{{ item.country }}</span>
+                  <span class="muted">{{ item.city }}</span>
+                  <span class="pill success">{{ item.users }} 人</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="report-card board-card">
+              <div class="card-head">
+                <div>
+                  <p class="eyebrow">运维快照</p>
+                  <h3>实时提示面板</h3>
+                </div>
+                <span class="meta-chip">安全态</span>
+              </div>
+              <div class="board-grid">
+                <div class="board-item">
+                  <p class="muted">圣诞黑白</p>
+                  <strong>{{ christmasActive ? '已启用' : '未启用' }}</strong>
+                  <small>点击顶部按钮即可触发飘雪与黑白</small>
+                </div>
+                <div class="board-item">
+                  <p class="muted">主题</p>
+                  <strong>{{ isDarkMode ? '黑暗模式' : '白天模式' }}</strong>
+                  <small>双模式随时切换</small>
+                </div>
+                <div class="board-item">
+                  <p class="muted">在线模型</p>
+                  <strong>{{ models.length }}</strong>
+                  <small>模型配置总数</small>
+                </div>
+                <div class="board-item">
+                  <p class="muted">在线人数</p>
+                  <strong>{{ dashboard.redis.online_count }}</strong>
+                  <small>实时在线用户</small>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
