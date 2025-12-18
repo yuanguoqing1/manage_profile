@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://10.30.79.140:8001'
 
@@ -32,6 +32,12 @@ const editingRolePrompt = ref(null)
 const chatMessages = ref([])
 const chatInput = ref('')
 const chatModelId = ref(null)
+const contacts = ref([])
+const peerMessages = ref([])
+const selectedPeerId = ref(null)
+const peerInput = ref('')
+const peerSending = ref(false)
+const peerMessagesLoading = ref(false)
 const defaultRolePrompt = '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
 
 const modals = ref({
@@ -88,6 +94,10 @@ const currentRolePrompt = computed(() => {
   if (target) return target.prompt
   return defaultRolePrompt
 })
+const availableContacts = computed(() =>
+  contacts.value.filter((item) => item.id !== currentUser.value?.id).sort((a, b) => a.name.localeCompare(b.name))
+)
+const selectedPeer = computed(() => availableContacts.value.find((item) => item.id === selectedPeerId.value) || null)
 
 function setStatus(type, message) {
   status.value = { type, message }
@@ -110,6 +120,10 @@ function clearAuth() {
   currentUser.value = null
   rolePrompts.value = []
   selectedRoleId.value = null
+  contacts.value = []
+  peerMessages.value = []
+  selectedPeerId.value = null
+  peerInput.value = ''
   localStorage.removeItem('token')
   localStorage.removeItem('user')
 }
@@ -237,6 +251,38 @@ async function fetchLogs() {
   logs.value = res.lines || []
 }
 
+async function fetchContacts() {
+  if (!isAuthed.value) {
+    contacts.value = []
+    return
+  }
+  try {
+    contacts.value = await request('/contacts')
+    if (!selectedPeerId.value && contacts.value.length) {
+      selectedPeerId.value = contacts.value[0].id
+    }
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function fetchPeerMessages(peerId) {
+  if (!peerId) return
+  peerMessagesLoading.value = true
+  try {
+    peerMessages.value = await request(`/contacts/messages/${peerId}`)
+  } catch (error) {
+    setStatus('error', error.message)
+  } finally {
+    peerMessagesLoading.value = false
+  }
+}
+
+async function openPeerChat(contact) {
+  selectedPeerId.value = contact.id
+  await fetchPeerMessages(contact.id)
+}
+
 async function syncAll() {
   loading.value = true
   try {
@@ -249,6 +295,7 @@ async function syncAll() {
       fetchRoles(),
       fetchRolePrompts(),
       fetchLogs(),
+      fetchContacts(),
     ])
     setStatus('success', '数据已同步')
   } catch (error) {
@@ -304,6 +351,10 @@ async function handleLogout() {
   selectedRoleId.value = null
   chatMessages.value = []
   chatInput.value = ''
+  contacts.value = []
+  peerMessages.value = []
+  selectedPeerId.value = null
+  peerInput.value = ''
   dashboard.value = { redis: { register_count: 0, online_count: 0 }, date: '', ip: '', weather: '' }
 }
 
@@ -670,6 +721,42 @@ function resetChat() {
   chatMessages.value = []
   chatInput.value = ''
 }
+
+async function sendPeerMessage() {
+  if (!selectedPeerId.value) {
+    setStatus('error', '请先选择联系人')
+    return
+  }
+  if (!peerInput.value.trim()) {
+    setStatus('error', '请输入要发送的内容')
+    return
+  }
+  const content = peerInput.value.trim()
+  peerSending.value = true
+  try {
+    const res = await request('/contacts/messages', {
+      method: 'POST',
+      body: JSON.stringify({ receiver_id: selectedPeerId.value, content }),
+    })
+    peerMessages.value.push(res)
+    peerInput.value = ''
+  } catch (error) {
+    setStatus('error', error.message)
+  } finally {
+    peerSending.value = false
+  }
+}
+
+watch(
+  () => selectedPeerId.value,
+  (peerId) => {
+    if (peerId) {
+      fetchPeerMessages(peerId)
+    } else {
+      peerMessages.value = []
+    }
+  }
+)
 
 onMounted(() => {
   if (token.value) {
