@@ -1,9 +1,9 @@
-"""数据库会话与初始化配置。"""
+"""数据库会话与配置。"""
 
 from __future__ import annotations
 
 import os
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, create_engine
 from sqlalchemy.engine import Engine
 
 
@@ -26,11 +26,6 @@ engine: Engine = create_engine(
     pool_pre_ping=True,   # 避免 MySQL 连接被踢后报错
     pool_recycle=3600,    # 防止长连接超时
 )
-
-
-def create_db_and_tables() -> None:
-    """初始化数据库并创建表结构。"""
-    SQLModel.metadata.create_all(engine)
 
 
 def get_session():
