@@ -1,3 +1,4 @@
+/* --------- 基础样式 --------- */
 :root {
   font-family: 'Inter', 'HarmonyOS Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: #e5edff;
@@ -17,6 +18,7 @@ body {
   min-height: 100vh;
 }
 
+/* --------- 浅色模式（基础） --------- */
 html.light-mode {
   background-color: #f5f6fa;
 }
@@ -1281,4 +1283,432 @@ label {
   .report-row.map-row {
     grid-template-columns: 1fr;
   }
+}
+
+/* --------- 深色模式（黑白高对比） --------- */
+html.dark-mode {
+  background-color: #050505;
+}
+
+html.dark-mode body {
+  background: #0b0b0b;
+  color: #f8fafc;
+}
+
+html.dark-mode .sidebar {
+  background: #0f0f10;
+  color: #f8fafc;
+  border-right: 1px solid #1f1f1f;
+  box-shadow: none;
+}
+
+html.dark-mode .brand {
+  background: #151515;
+  box-shadow: none;
+}
+
+html.dark-mode .logo {
+  background: #f8fafc;
+  color: #0b0b0b;
+}
+
+html.dark-mode .brand-sub,
+html.dark-mode .muted,
+html.dark-mode .eyebrow,
+html.dark-mode .meta-chip,
+html.dark-mode .panel.stat .label,
+html.dark-mode .contact-desc,
+html.dark-mode .radar-desc,
+html.dark-mode .radar-meta p {
+  color: #a1a1aa;
+}
+
+html.dark-mode .menu button {
+  background: #151515;
+  color: #f8fafc;
+  border-color: #2a2a2a;
+}
+
+html.dark-mode .menu button.active {
+  background: #f8fafc;
+  color: #0b0b0b;
+  border-color: #f8fafc;
+  box-shadow: none;
+}
+
+html.dark-mode .content {
+  background: #0b0b0b;
+}
+
+html.dark-mode button {
+  background: #f8fafc;
+  color: #0b0b0b;
+  box-shadow: none;
+}
+
+html.dark-mode button.ghost,
+html.dark-mode button.outline {
+  background: transparent;
+  border-color: #3f3f46;
+  color: #f8fafc;
+}
+
+html.dark-mode .icon {
+  background: #151515;
+  border-color: #2a2a2a;
+  color: #f8fafc;
+}
+
+html.dark-mode .avatar {
+  background: #1f1f1f;
+  border-color: #2a2a2a;
+  color: #f8fafc;
+}
+
+html.dark-mode .alert,
+html.dark-mode .loading-banner,
+html.dark-mode .panel,
+html.dark-mode .modal,
+html.dark-mode .card,
+html.dark-mode .detail-panel,
+html.dark-mode .wechat-window,
+html.dark-mode .wechat-panel,
+html.dark-mode .peer-list,
+html.dark-mode .peer-conversation,
+html.dark-mode .report-card {
+  background: #121212;
+  border-color: #2a2a2a;
+  box-shadow: none;
+}
+
+html.dark-mode .alert.success,
+html.dark-mode .alert.error {
+  background: #1a1a1a;
+  border-color: #3f3f46;
+  color: #e5e7eb;
+}
+
+html.dark-mode .panel::after {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+html.dark-mode .tag,
+html.dark-mode .tag.success,
+html.dark-mode .pill,
+html.dark-mode .pill.ok,
+html.dark-mode .pill.warn,
+html.dark-mode .pill.danger,
+html.dark-mode .report-card .pill,
+html.dark-mode .report-card .pill.success {
+  background: #1f1f1f;
+  border-color: #3f3f46;
+  color: #e5e7eb;
+}
+
+html.dark-mode .table th {
+  background: #18181b;
+  color: #e5e7eb;
+}
+
+html.dark-mode .table td,
+html.dark-mode .table th {
+  border-bottom-color: #2a2a2a;
+}
+
+html.dark-mode .table .clickable:hover {
+  background: #1a1a1a;
+}
+
+html.dark-mode .inline-input,
+html.dark-mode input,
+html.dark-mode select,
+html.dark-mode textarea,
+html.dark-mode .wechat-input {
+  background: #151515;
+  border-color: #2a2a2a;
+  color: #f8fafc;
+}
+
+html.dark-mode .wechat-topbar,
+html.dark-mode .wechat-composer {
+  background: #0f0f10;
+  border-color: #1f1f1f;
+}
+
+html.dark-mode .wechat-body {
+  background: #0b0b0b;
+}
+
+html.dark-mode .wechat-bubble,
+html.dark-mode .peer-item {
+  background: #151515;
+  border-color: #2a2a2a;
+  color: #f8fafc;
+}
+
+html.dark-mode .wechat-bubble.assistant,
+html.dark-mode .wechat-bubble.user {
+  background: #1f1f1f;
+  border-color: #3f3f46;
+}
+
+html.dark-mode .peer-item:hover,
+html.dark-mode .peer-item.active {
+  background: #1f1f1f;
+  border-color: #3f3f46;
+}
+
+html.dark-mode .peer-avatar,
+html.dark-mode .wechat-avatar,
+html.dark-mode .wechat-avatar.assistant,
+html.dark-mode .wechat-avatar.user {
+  background: #f8fafc;
+  color: #0b0b0b;
+}
+
+html.dark-mode .peer-avatar::after {
+  border-color: #0b0b0b;
+}
+
+html.dark-mode .report-card .card-title,
+html.dark-mode .table-title,
+html.dark-mode .bar-label,
+html.dark-mode label {
+  color: #d4d4d8;
+}
+
+html.dark-mode .mini-bars .bar,
+html.dark-mode .line-bar,
+html.dark-mode .progress-circle,
+html.dark-mode .progress-circle.alt {
+  background: #d4d4d8;
+  border-color: #3f3f46;
+  color: #0b0b0b;
+}
+
+html.dark-mode .line-bar .dot,
+html.dark-mode .radar-dot,
+html.dark-mode .map-dot {
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+html.dark-mode .radar-ring,
+html.dark-mode .radar-ring.small {
+  border-color: #d4d4d8;
+}
+
+html.dark-mode .map-board {
+  background: #111111;
+  border-color: #3f3f46;
+}
+
+html.dark-mode .map-silhouette {
+  background: none;
+}
+
+html.dark-mode .source-list li,
+html.dark-mode .board-item,
+html.dark-mode .info-row {
+  background: #151515;
+  border-color: #2a2a2a;
+}
+
+html.dark-mode .spinner {
+  border-color: rgba(255, 255, 255, 0.5);
+  border-top-color: #f8fafc;
+}
+
+/* --------- 浅色模式（高可读性） --------- */
+html.light-mode {
+  background-color: #f8fafc;
+}
+
+html.light-mode body {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+html.light-mode .sidebar {
+  background: #ffffff;
+  border-right: 1px solid #cbd5e1;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+html.light-mode .brand {
+  background: #f1f5f9;
+  box-shadow: none;
+}
+
+html.light-mode .logo {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+html.light-mode .menu button {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+html.light-mode .menu button.active {
+  background: #1d4ed8;
+  color: #ffffff;
+  border-color: #1d4ed8;
+  box-shadow: none;
+}
+
+html.light-mode .content {
+  background: #f1f5f9;
+}
+
+html.light-mode button {
+  background: #1d4ed8;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+html.light-mode button.ghost,
+html.light-mode button.outline {
+  background: transparent;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+html.light-mode .icon {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+html.light-mode .panel,
+html.light-mode .report-card,
+html.light-mode .panel.neon-panel,
+html.light-mode .card,
+html.light-mode .detail-panel,
+html.light-mode .wechat-window,
+html.light-mode .wechat-panel,
+html.light-mode .peer-list,
+html.light-mode .peer-conversation {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #cbd5e1;
+  box-shadow: none;
+}
+
+html.light-mode .muted,
+html.light-mode .eyebrow,
+html.light-mode .meta-chip,
+html.light-mode .panel.stat .label,
+html.light-mode .contact-desc,
+html.light-mode .radar-desc,
+html.light-mode .radar-meta p {
+  color: #475569;
+}
+
+html.light-mode .meta-chip {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+}
+
+html.light-mode .report-card .card-title,
+html.light-mode .table-title,
+html.light-mode label,
+html.light-mode .bar-label {
+  color: #475569;
+}
+
+html.light-mode .report-card .pill {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+html.light-mode .report-card .pill.success {
+  background: #dcfce7;
+  border-color: #22c55e;
+  color: #166534;
+}
+
+html.light-mode .table th {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+html.light-mode .table td,
+html.light-mode .table th {
+  border-bottom-color: #e2e8f0;
+}
+
+html.light-mode .table .clickable:hover {
+  background: #e2e8f0;
+}
+
+html.light-mode .inline-input,
+html.light-mode input,
+html.light-mode select,
+html.light-mode textarea,
+html.light-mode .wechat-input {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+html.light-mode .wechat-topbar,
+html.light-mode .wechat-composer {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+html.light-mode .wechat-body {
+  background: #f8fafc;
+}
+
+html.light-mode .wechat-bubble.assistant {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+html.light-mode .wechat-bubble.user {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+html.light-mode .peer-item {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+html.light-mode .peer-item:hover,
+html.light-mode .peer-item.active {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+}
+
+html.light-mode .peer-avatar,
+html.light-mode .wechat-avatar,
+html.light-mode .wechat-avatar.assistant,
+html.light-mode .wechat-avatar.user {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+html.light-mode .map-board {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+html.light-mode .map-silhouette {
+  background: none;
+}
+
+html.light-mode .source-list li,
+html.light-mode .board-item,
+html.light-mode .info-row {
+  background: #f8fafc;
+  border-color: #e2e8f0;
 }
