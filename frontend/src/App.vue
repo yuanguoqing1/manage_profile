@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { startChristmasEffects, stopChristmasEffects } from './christmasEffects'
+import { startChristmasEffects, stopChristmasEffects } from './utils/christmasEffects'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://10.30.79.140:8001'
 
