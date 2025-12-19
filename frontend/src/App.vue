@@ -35,20 +35,6 @@ const editingRolePrompt = ref(null)
 const chatMessages = ref([])
 const chatInput = ref('')
 const chatModelId = ref(null)
-const jobConfig = ref({
-  service_url: '',
-  service_token: '',
-  resume_link: '',
-  greeting: '您好，我对岗位很感兴趣，这是我的简历，期待沟通。',
-  keywords: '',
-  cities: '',
-  auto_apply: true,
-  auto_greet: true,
-  daily_limit: 30,
-})
-const jobRuns = ref([])
-const jobSubmitting = ref(false)
-
 const contacts = ref([])
 const peerMessages = ref([])
 const selectedPeerId = ref(null)
@@ -179,18 +165,6 @@ function clearAuth() {
   peerInput.value = ''
   unreadMap.value = {}
   lastPreviewMap.value = {}
-  jobRuns.value = []
-  jobConfig.value = {
-    service_url: '',
-    service_token: '',
-    resume_link: '',
-    greeting: '您好，我对岗位很感兴趣，这是我的简历，期待沟通。',
-    keywords: '',
-    cities: '',
-    auto_apply: true,
-    auto_greet: true,
-    daily_limit: 30,
-  }
   localStorage.removeItem('token')
   localStorage.removeItem('user')
 }
@@ -336,75 +310,6 @@ async function fetchLogs() {
   logs.value = res.lines || []
 }
 
-async function fetchJobConfig() {
-  if (!isAuthed.value) {
-    jobConfig.value = {
-      service_url: '',
-      service_token: '',
-      resume_link: '',
-      greeting: '您好，我对岗位很感兴趣，这是我的简历，期待沟通。',
-      keywords: '',
-      cities: '',
-      auto_apply: true,
-      auto_greet: true,
-      daily_limit: 30,
-    }
-    return
-  }
-  const res = await request('/job-helper/config')
-  jobConfig.value = { ...jobConfig.value, ...res }
-}
-
-async function saveJobConfig() {
-  if (!isAdmin.value) {
-    setStatus('error', '仅管理员可修改工作无忧配置')
-    return
-  }
-  try {
-    const payload = { ...jobConfig.value }
-    await request('/job-helper/config', { method: 'PUT', body: JSON.stringify(payload) })
-    setStatus('success', '工作无忧配置已保存')
-    await fetchJobConfig()
-  } catch (error) {
-    setStatus('error', error.message)
-  }
-}
-
-async function fetchJobRuns() {
-  if (!isAuthed.value) {
-    jobRuns.value = []
-    return
-  }
-  try {
-    jobRuns.value = await request('/job-helper/runs')
-  } catch (error) {
-    setStatus('error', error.message)
-  }
-}
-
-async function triggerJobRun() {
-  if (jobSubmitting.value) return
-  jobSubmitting.value = true
-  try {
-    const payload = {
-      keywords: jobConfig.value.keywords,
-      cities: jobConfig.value.cities,
-      resume_link: jobConfig.value.resume_link,
-      greeting: jobConfig.value.greeting,
-      auto_apply: jobConfig.value.auto_apply,
-      auto_greet: jobConfig.value.auto_greet,
-      daily_limit: jobConfig.value.daily_limit,
-    }
-    const res = await request('/job-helper/run', { method: 'POST', body: JSON.stringify(payload) })
-    setStatus('success', '任务已提交至 get_jobs')
-    jobRuns.value = [res, ...(jobRuns.value || [])].slice(0, 50)
-  } catch (error) {
-    setStatus('error', error.message)
-  } finally {
-    jobSubmitting.value = false
-  }
-}
-
 function clearUnread(peerId) {
   if (!peerId) return
   unreadMap.value = { ...unreadMap.value, [peerId]: 0 }
@@ -483,8 +388,6 @@ async function syncAll() {
       fetchUsers(),
       fetchRoles(),
       fetchRolePrompts(),
-      fetchJobConfig(),
-      fetchJobRuns(),
       fetchLogs(),
       fetchContacts(),
     ])
@@ -1212,9 +1115,6 @@ onBeforeUnmount(() => {
         <button :class="{ active: activeMenu === 'web' }" @click="activeMenu = 'web'" :disabled="!isAuthed">
           网页收藏
         </button>
-        <button :class="{ active: activeMenu === 'jobs' }" @click="activeMenu = 'jobs'" :disabled="!isAuthed">
-          工作无忧
-        </button>
         <button :class="{ active: activeMenu === 'users' }" @click="activeMenu = 'users'" :disabled="!isAdmin">
           用户与角色
         </button>
@@ -1839,84 +1739,6 @@ onBeforeUnmount(() => {
                   </tr>
                 </tbody>
               </table>
-            </div>
-          </div>
-        </section>
-
-        <!-- 工作无忧集成 -->
-        <section class="panel" v-if="activeMenu === 'jobs'">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">工作无忧</p>
-              <h3>get_jobs 自动投递 + 打招呼</h3>
-              <p class="muted">配置 get_jobs 服务地址、简历和招呼语，一键提交投递任务。</p>
-            </div>
-            <div class="header-actions">
-              <button class="ghost" @click="fetchJobConfig" :disabled="loading">重新载入</button>
-              <button class="outline" @click="saveJobConfig" :disabled="loading || !isAdmin">保存配置</button>
-            </div>
-          </div>
-          <div class="grid two-cols">
-            <div class="card">
-              <h4>服务与模板</h4>
-              <label>get_jobs 服务地址</label>
-              <input v-model="jobConfig.service_url" placeholder="如：https://your-get-jobs-domain/api/run" />
-              <label>服务 Token（可选）</label>
-              <input v-model="jobConfig.service_token" placeholder="如需要 Bearer token 可填写" />
-              <label>简历链接</label>
-              <input v-model="jobConfig.resume_link" placeholder="可放 OSS / GitHub / 本地存储链接" />
-              <label>招呼语</label>
-              <textarea v-model="jobConfig.greeting" rows="3" placeholder="您好，我对岗位很感兴趣..."></textarea>
-              <div class="inline-controls">
-                <label><input type="checkbox" v-model="jobConfig.auto_apply" /> 自动投递</label>
-                <label><input type="checkbox" v-model="jobConfig.auto_greet" /> 自动打招呼</label>
-              </div>
-              <label>每日最大投递数</label>
-              <input type="number" v-model.number="jobConfig.daily_limit" min="1" />
-            </div>
-            <div class="card">
-              <h4>投递策略</h4>
-              <label>关键词（逗号分隔）</label>
-              <input v-model="jobConfig.keywords" placeholder="如：Python, 后端, 爬虫" />
-              <label>城市（逗号分隔）</label>
-              <input v-model="jobConfig.cities" placeholder="如：上海, 杭州, 远程" />
-              <div class="inline-controls">
-                <button @click="triggerJobRun" :disabled="jobSubmitting" class="primary">{{ jobSubmitting ? '提交中...' : '立即投递' }}</button>
-                <button class="ghost" @click="fetchJobRuns">刷新任务</button>
-              </div>
-              <div class="table-wrapper compact">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>状态</th>
-                      <th>关键词 / 城市</th>
-                      <th>时间</th>
-                      <th>说明</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="run in jobRuns" :key="run.id">
-                      <td>
-                        <span class="pill" :class="{ ok: run.status === 'success', warn: run.status === 'pending', danger: run.status === 'failed' }">
-                          {{ run.status }}
-                        </span>
-                      </td>
-                      <td>
-                        <div class="muted">{{ run.keywords || '—' }}</div>
-                        <div class="muted">{{ run.cities || '不限' }}</div>
-                      </td>
-                      <td>
-                        <div>{{ new Date(run.requested_at).toLocaleString() }}</div>
-                        <div class="muted" v-if="run.finished_at">完结：{{ new Date(run.finished_at).toLocaleString() }}</div>
-                      </td>
-                      <td class="muted">{{ run.message }}</td>
-                    </tr>
-                    <tr v-if="!jobRuns.length">
-                      <td colspan="4" class="muted">暂无投递记录</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
             </div>
           </div>
         </section>

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 
 from sqlmodel import SQLModel
@@ -123,54 +122,3 @@ class RolePromptPublic(SQLModel):
     id: int
     name: str
     prompt: str
-
-
-class JobAutomationConfigPublic(SQLModel):
-    id: int
-    service_url: str
-    service_token: Optional[str]
-    resume_link: Optional[str]
-    greeting: str
-    keywords: str
-    cities: str
-    auto_apply: bool
-    auto_greet: bool
-    daily_limit: int
-
-
-class JobAutomationConfigUpdate(SQLModel):
-    service_url: Optional[str] = None
-    service_token: Optional[str] = None
-    resume_link: Optional[str] = None
-    greeting: Optional[str] = None
-    keywords: Optional[str] = None
-    cities: Optional[str] = None
-    auto_apply: Optional[bool] = None
-    auto_greet: Optional[bool] = None
-    daily_limit: Optional[int] = None
-
-
-class JobRunPublic(SQLModel):
-    id: int
-    status: str
-    message: str
-    requested_at: datetime
-    finished_at: Optional[datetime]
-    requested_by: int
-    keywords: Optional[str]
-    cities: Optional[str]
-    resume_link: Optional[str]
-    greeting: Optional[str]
-    auto_apply: Optional[bool]
-    auto_greet: Optional[bool]
-    daily_limit: Optional[int]
-
-
-class JobRunRequest(SQLModel):
-    keywords: Optional[str] = None
-    cities: Optional[str] = None
-    resume_link: Optional[str] = None
-    greeting: Optional[str] = None
-    auto_apply: Optional[bool] = None
-    auto_greet: Optional[bool] = None
-    daily_limit: Optional[int] = None

@@ -2,21 +2,10 @@
 
 from app.models.message import PeerMessage
 from app.models.token import AuthToken
-from app.models.user import (
-    JobAutomationConfig,
-    JobRun,
-    ModelConfig,
-    Role,
-    RolePrompt,
-    User,
-    WebCategory,
-    WebPage,
-)
+from app.models.user import ModelConfig, Role, RolePrompt, User, WebCategory, WebPage
 
 __all__ = [
     "AuthToken",
-    "JobAutomationConfig",
-    "JobRun",
     "ModelConfig",
     "PeerMessage",
     "Role",
