@@ -1,7 +1,10 @@
-// 路由配置占位（可按需接入 vue-router）
-
+// 简易路由表（Hash 路由用于菜单定位）
 export const routes = [
-  { path: '/', name: 'home' },
-  { path: '/about', name: 'about' },
-  { path: '/user', name: 'user' },
+  { path: '/', name: 'home', menu: 'home' },
+  { path: '/chat', name: 'chat', menu: 'chat', requiresAuth: true },
+  { path: '/contacts', name: 'contacts', menu: 'contacts', requiresAuth: true },
+  { path: '/models', name: 'models', menu: 'models', requiresAuth: true },
+  { path: '/web', name: 'web', menu: 'web', requiresAuth: true },
+  { path: '/users', name: 'users', menu: 'users', requiresAdmin: true },
+  { path: '/logs', name: 'logs', menu: 'logs', requiresAdmin: true },
 ]

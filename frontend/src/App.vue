@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { routes } from './router'
 import { startChristmasEffects, stopChristmasEffects } from './utils/christmasEffects'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://10.30.79.140:8001'
@@ -208,6 +209,47 @@ function toggleChristmas() {
   christmasActive.value = !christmasActive.value
   if (christmasActive.value) startChristmasEffects()
   else stopChristmasEffects()
+}
+
+function getRouteFromHash() {
+  if (typeof window === 'undefined') return '/'
+  const hash = window.location.hash || ''
+  const path = hash.replace(/^#/, '').trim()
+  return path || '/'
+}
+
+function resolveRoute(path) {
+  return routes.find((route) => route.path === path) || null
+}
+
+function navigateTo(menu, options = {}) {
+  const target = routes.find((route) => route.menu === menu)
+  if (!target) return
+  if (target.requiresAdmin && !isAdmin.value) return
+  if (target.requiresAuth && !isAuthed.value) return
+  activeMenu.value = target.menu
+  if (typeof window === 'undefined') return
+  const url = `#${target.path}`
+  if (options.replace) window.history.replaceState(null, '', url)
+  else window.location.hash = target.path
+}
+
+function syncRouteFromLocation() {
+  const path = getRouteFromHash()
+  const route = resolveRoute(path)
+  if (!route) {
+    navigateTo('home', { replace: true })
+    return
+  }
+  if (route.requiresAdmin && !isAdmin.value) {
+    navigateTo('home', { replace: true })
+    return
+  }
+  if (route.requiresAuth && !isAuthed.value) {
+    navigateTo('home', { replace: true })
+    return
+  }
+  activeMenu.value = route.menu
 }
 
 async function request(path, options = {}) {
@@ -1075,6 +1117,8 @@ watch(
 
 onMounted(() => {
   applyThemeClasses()
+  syncRouteFromLocation()
+  window.addEventListener('hashchange', syncRouteFromLocation)
   if (token.value) {
     syncAll()
     connectWs()
@@ -1083,6 +1127,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopChristmasEffects()
+  window.removeEventListener('hashchange', syncRouteFromLocation)
+})
+
+watch([isAuthed, isAdmin], () => {
+  syncRouteFromLocation()
 })
 </script>
 
@@ -1098,27 +1147,27 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <nav class="menu">
-        <button :class="{ active: activeMenu === 'home' }" @click="activeMenu = 'home'">首页</button>
-        <button :class="{ active: activeMenu === 'chat' }" @click="activeMenu = 'chat'" :disabled="!isAuthed">
+        <button :class="{ active: activeMenu === 'home' }" @click="navigateTo('home')">首页</button>
+        <button :class="{ active: activeMenu === 'chat' }" @click="navigateTo('chat')" :disabled="!isAuthed">
           星际聊天
         </button>
         <button
           :class="{ active: activeMenu === 'contacts' }"
-          @click="activeMenu = 'contacts'"
+          @click="navigateTo('contacts')"
           :disabled="!isAuthed"
         >
           站内互聊
         </button>
-        <button :class="{ active: activeMenu === 'models' }" @click="activeMenu = 'models'" :disabled="!isAuthed">
+        <button :class="{ active: activeMenu === 'models' }" @click="navigateTo('models')" :disabled="!isAuthed">
           大模型管理
         </button>
-        <button :class="{ active: activeMenu === 'web' }" @click="activeMenu = 'web'" :disabled="!isAuthed">
+        <button :class="{ active: activeMenu === 'web' }" @click="navigateTo('web')" :disabled="!isAuthed">
           网页收藏
         </button>
-        <button :class="{ active: activeMenu === 'users' }" @click="activeMenu = 'users'" :disabled="!isAdmin">
+        <button :class="{ active: activeMenu === 'users' }" @click="navigateTo('users')" :disabled="!isAdmin">
           用户与角色
         </button>
-        <button :class="{ active: activeMenu === 'logs' }" @click="activeMenu = 'logs'" :disabled="!isAdmin">
+        <button :class="{ active: activeMenu === 'logs' }" @click="navigateTo('logs')" :disabled="!isAdmin">
           日志记录
         </button>
       </nav>
