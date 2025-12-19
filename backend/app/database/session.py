@@ -2,39 +2,38 @@
 
 from __future__ import annotations
 
+import os
 from sqlmodel import Session, SQLModel, create_engine
-
-sqlite_url = "sqlite:///./data.db"
-engine = create_engine(sqlite_url, echo=False, connect_args={"check_same_thread": False})
+from sqlalchemy.engine import Engine
 
 
-def ensure_columns() -> None:
-    """确保旧表拥有新字段，缺失时自动补齐。"""
+def _mysql_url() -> str:
+    # 你也可以直接写死，但建议用环境变量，部署更舒服
+    user = os.getenv("MYSQL_USER", "root")
+    password = os.getenv("MYSQL_PASSWORD", "123456")
+    host = os.getenv("MYSQL_HOST", "127.0.0.1")
+    port = os.getenv("MYSQL_PORT", "3306")
+    db = os.getenv("MYSQL_DB", "manage_profile")
+    # PyMySQL 驱动写法：mysql+pymysql://
+    return f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}?charset=utf8mb4"
 
-    required_columns = {
-        "user": {
-            "password_hash": "TEXT",
-            "salt": "TEXT",
-            "role": "TEXT DEFAULT 'user'",
-        }
-    }
-    with engine.begin() as conn:
-        for table, columns in required_columns.items():
-            existing = {row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table}")').all()}
-            for column, sql_type in columns.items():
-                if column not in existing:
-                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")  # noqa: S608
+
+DATABASE_URL = os.getenv("DATABASE_URL") or _mysql_url()
+
+engine: Engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,   # 避免 MySQL 连接被踢后报错
+    pool_recycle=3600,    # 防止长连接超时
+)
 
 
 def create_db_and_tables() -> None:
     """初始化数据库并创建表结构。"""
-
     SQLModel.metadata.create_all(engine)
-    ensure_columns()
 
 
 def get_session():
     """获取数据库会话。"""
-
     with Session(engine) as session:
         yield session

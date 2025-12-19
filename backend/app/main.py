@@ -5,16 +5,18 @@ import hashlib
 import logging
 import os
 import secrets
-from pathlib import Path
 from enum import Enum
-from typing import Dict, List, Optional, Union, Set
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Union
 
 import httpx
 
 try:
     import redis
-except ImportError:  # pragma: no cover - 在无依赖环境下自动降级
+except ImportError:  # pragma: no cover
     redis = None  # type: ignore
+
+from datetime import datetime
 
 from fastapi import (
     Depends,
@@ -22,19 +24,16 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
-    status,
     WebSocket,
     WebSocketDisconnect,
+    status,
 )
-from datetime import datetime
-
-from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import and_, or_
+from fastapi.responses import StreamingResponse
+from sqlalchemy import and_, or_, func
 from sqlmodel import Field, Session, SQLModel, select
 
 from app.database.session import create_db_and_tables, engine, get_session
-
 
 LOG_FILE = Path("app.log")
 logging.basicConfig(
@@ -45,15 +44,11 @@ logging.basicConfig(
 
 
 class Role(str, Enum):
-    """角色类型"""
-
     admin = "admin"
     user = "user"
 
 
 class User(SQLModel, table=True):
-    """用户表"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     balance: float = Field(default=0.0, ge=0.0)
@@ -63,16 +58,12 @@ class User(SQLModel, table=True):
 
 
 class UserCreate(SQLModel):
-    """注册/创建用户入参"""
-
     name: str
     password: str
     role: Optional[Role] = None
 
 
 class UserPublic(SQLModel):
-    """对外展示的用户信息"""
-
     id: int
     name: str
     balance: float
@@ -80,28 +71,20 @@ class UserPublic(SQLModel):
 
 
 class UserContactPublic(SQLModel):
-    """站内互聊展示的联系人信息"""
-
     id: int
     name: str
     role: str
 
 
 class UserContactStatusPublic(UserContactPublic):
-    """带在线状态的联系人信息"""
-
     is_online: bool
 
 
 class BalanceUpdate(SQLModel):
-    """余额调整入参"""
-
     amount: float
 
 
 class ModelConfig(SQLModel, table=True):
-    """大模型配置表"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     base_url: str
@@ -134,16 +117,12 @@ class ModelConfigPublic(SQLModel):
 
 
 class WebCategory(SQLModel, table=True):
-    """网页分类"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     description: str = Field(default="")
 
 
 class WebPage(SQLModel, table=True):
-    """网页信息记录"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     category_id: int = Field(foreign_key="webcategory.id")
     url: str
@@ -184,8 +163,6 @@ class WebPagePublic(SQLModel):
 
 
 class LoginRequest(SQLModel):
-    """登录入参"""
-
     name: str
     password: str
 
@@ -196,15 +173,11 @@ class LoginResponse(SQLModel):
 
 
 class ChatMessage(SQLModel):
-    """聊天消息"""
-
     role: str
     content: str
 
 
 class PeerMessage(SQLModel, table=True):
-    """站内互聊消息表"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     sender_id: int = Field(foreign_key="user.id")
     receiver_id: int = Field(foreign_key="user.id")
@@ -213,8 +186,6 @@ class PeerMessage(SQLModel, table=True):
 
 
 class ChatCompletionRequest(SQLModel):
-    """聊天请求参数"""
-
     model_id: Optional[int] = None
     messages: List[ChatMessage]
     stream: bool = False
@@ -226,8 +197,6 @@ UsageValue = Union[int, Dict[str, int]]
 
 
 class ChatCompletionResponse(SQLModel):
-    """与 OpenAI 对齐的返回体"""
-
     id: str
     object: str
     created: int
@@ -237,15 +206,11 @@ class ChatCompletionResponse(SQLModel):
 
 
 class PeerMessageCreate(SQLModel):
-    """创建站内互聊消息入参"""
-
     receiver_id: int
     content: str
 
 
 class PeerMessagePublic(SQLModel):
-    """站内互聊返回体"""
-
     id: int
     sender_id: int
     receiver_id: int
@@ -256,16 +221,12 @@ class PeerMessagePublic(SQLModel):
 
 
 class UserUpdate(SQLModel):
-    """用户信息更新入参"""
-
     name: Optional[str] = None
     password: Optional[str] = None
     role: Optional[Role] = None
 
 
 class ModelConfigUpdate(SQLModel):
-    """大模型配置更新入参"""
-
     name: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
@@ -276,23 +237,17 @@ class ModelConfigUpdate(SQLModel):
 
 
 class RolePrompt(SQLModel, table=True):
-    """提示词角色表"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     prompt: str
 
 
 class RolePromptCreate(SQLModel):
-    """新增提示词入参"""
-
     name: str
     prompt: str
 
 
 class RolePromptUpdate(SQLModel):
-    """更新提示词入参"""
-
     name: Optional[str] = None
     prompt: Optional[str] = None
 
@@ -304,23 +259,16 @@ class RolePromptPublic(SQLModel):
 
 
 class RoleUpdate(SQLModel):
-    """角色赋予入参"""
-
     user_id: int
     role: Role
 
 
 class JobAutomationConfig(SQLModel, table=True):
-    """get_jobs 服务集成配置"""
-
     id: Optional[int] = Field(default=1, primary_key=True)
     service_url: str = Field(default="", description="get_jobs 服务接收任务的地址")
     service_token: Optional[str] = Field(default=None, description="get_jobs 服务鉴权 token，可选")
     resume_link: Optional[str] = Field(default=None, description="简历链接或存储地址")
-    greeting: str = Field(
-        default="您好，我对岗位很感兴趣，这是我的简历，期待沟通。",
-        description="开场白模板",
-    )
+    greeting: str = Field(default="您好，我对岗位很感兴趣，这是我的简历，期待沟通。", description="开场白模板")
     keywords: str = Field(default="", description="投递关键词，逗号分隔")
     cities: str = Field(default="", description="城市列表，逗号分隔")
     auto_apply: bool = Field(default=True, description="是否自动投递")
@@ -354,8 +302,6 @@ class JobAutomationConfigUpdate(SQLModel):
 
 
 class JobRun(SQLModel, table=True):
-    """投递任务执行记录"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     status: str = Field(default="pending")
     message: str = Field(default="")
@@ -397,13 +343,17 @@ class JobRunRequest(SQLModel):
     daily_limit: Optional[int] = None
 
 
-# 注意：内存态 token_store，多 worker 会失效（必须单进程/单 worker）
-token_store: Dict[str, Dict[str, int]] = {}
+class AuthToken(SQLModel, table=True):
+    token: str = Field(primary_key=True, index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: Optional[datetime] = None
 
 
+# -----------------------------
+# Redis（可选）
+# -----------------------------
 def init_redis() -> Optional["redis.Redis"]:
-    """初始化 Redis 客户端，失败时返回 None。"""
-
     if redis is None:
         return None
     host = os.getenv("REDIS_HOST", "localhost")
@@ -414,12 +364,15 @@ def init_redis() -> Optional["redis.Redis"]:
         client.ping()
         return client
     except Exception as exc:  # noqa: BLE001
-        print(f"Redis 不可用，使用内存计数，原因：{exc}")
+        logging.warning("Redis 连接失败，将使用数据库统计：%s", exc)
         return None
 
 
 redis_client = init_redis()
-fallback_counters: Dict[str, set | int] = {"register": 0, "online_tokens": set()}
+if redis_client:
+    logging.info("Redis 连接成功")
+else:
+    logging.info("Redis 不可用，使用数据库统计在线与注册数量")
 
 
 def hash_password(password: str, salt: str) -> str:
@@ -431,45 +384,53 @@ def admin_exists(session: Session) -> bool:
 
 
 def increment_register_count() -> None:
+    # Redis 有就自增一个统计值；没有也没关系，注册数可直接从 DB count 得到
     if redis_client:
         redis_client.incr("register_count")
-    else:
-        fallback_counters["register"] = int(fallback_counters["register"]) + 1
 
 
 def register_user_online(token: str) -> None:
+    # Redis 有就记录 token（只用于“在线计数”用途）；DB 里 AuthToken 才是事实来源
     if redis_client:
         redis_client.sadd("online_tokens", token)
-    else:
-        fallback_counters["online_tokens"].add(token)
 
 
 def logout_user_online(token: str) -> None:
     if redis_client:
         redis_client.srem("online_tokens", token)
-    else:
-        fallback_counters["online_tokens"].discard(token)
 
 
-def get_online_count() -> int:
+def purge_expired_tokens(session: Session) -> int:
+    now = datetime.utcnow()
+    expired = session.exec(select(AuthToken).where(AuthToken.expires_at.is_not(None), AuthToken.expires_at < now)).all()
+    for r in expired:
+        session.delete(r)
+    if expired:
+        session.commit()
+    return len(expired)
+
+
+def get_online_count(session: Session) -> int:
+    # 优先 Redis（实时），否则用 DB token 数（注意可配合 expires_at 清理）
     if redis_client:
-        return redis_client.scard("online_tokens")
-    return len(fallback_counters["online_tokens"])
+        return int(redis_client.scard("online_tokens"))
+    # DB 统计 token 数
+    purge_expired_tokens(session)
+    return session.exec(select(func.count()).select_from(AuthToken)).one()[0]
 
 
-def get_register_count() -> int:
+def get_register_count(session: Session) -> int:
+    # Redis 有就读 Redis；否则用 DB 用户表 count
     if redis_client:
         value = redis_client.get("register_count")
         return int(value) if value else 0
-    return int(fallback_counters["register"])
+    return session.exec(select(func.count()).select_from(User)).one()[0]
 
 
 # -----------------------------
-# WebSocket 连接管理（新增）
+# WebSocket 连接管理
 # -----------------------------
 class ConnectionManager:
-    """管理用户 WebSocket 连接（同一用户允许多个连接，例如多标签页）。"""
-
     def __init__(self) -> None:
         self._connections: Dict[int, Set[WebSocket]] = {}
 
@@ -506,9 +467,7 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 
-
 app = FastAPI(title="Profile Manager", version="0.2.0")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -521,6 +480,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     create_db_and_tables()
+    logging.info("startup done")
 
 
 @app.get("/health")
@@ -528,16 +488,28 @@ def healthcheck():
     return {"status": "ok"}
 
 
+# -----------------------------
+# Auth helpers
+# -----------------------------
+def _validate_token_record(record: AuthToken) -> None:
+    if record.expires_at is not None and record.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已过期")
+
+
 def get_current_user(
-    authorization: str = Header(default=None), session: Session = Depends(get_session)
+    authorization: str = Header(default=None),
+    session: Session = Depends(get_session),
 ) -> User:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少凭证")
     token = authorization.split()[1]
-    record = token_store.get(token)
+
+    record = session.get(AuthToken, token)
     if not record:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已失效")
-    user = session.get(User, record["user_id"])
+    _validate_token_record(record)
+
+    user = session.get(User, record.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     return user
@@ -550,77 +522,24 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 
 
 def get_user_by_token(token: str, session: Session) -> User:
-    record = token_store.get(token)
+    record = session.get(AuthToken, token)
     if not record:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已失效")
-    user = session.get(User, record["user_id"])
+    _validate_token_record(record)
+
+    user = session.get(User, record.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     return user
 
 
-def get_job_config(session: Session) -> JobAutomationConfig:
-    config = session.get(JobAutomationConfig, 1)
-    if config:
-        return config
-    config = JobAutomationConfig()
-    session.add(config)
-    session.commit()
-    session.refresh(config)
-    return config
-
-
-def merge_job_config(config: JobAutomationConfig, payload: JobRunRequest) -> JobRunRequest:
-    return JobRunRequest(
-        keywords=payload.keywords if payload.keywords is not None else config.keywords,
-        cities=payload.cities if payload.cities is not None else config.cities,
-        resume_link=payload.resume_link if payload.resume_link is not None else config.resume_link,
-        greeting=payload.greeting if payload.greeting is not None else config.greeting,
-        auto_apply=payload.auto_apply if payload.auto_apply is not None else config.auto_apply,
-        auto_greet=payload.auto_greet if payload.auto_greet is not None else config.auto_greet,
-        daily_limit=payload.daily_limit if payload.daily_limit is not None else config.daily_limit,
-    )
-
-
-def call_get_jobs(
-    *,
-    config: JobAutomationConfig,
-    merged: JobRunRequest,
-) -> str:
-    if not config.service_url:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先配置 get_jobs 服务地址")
-
-    headers = {"Content-Type": "application/json"}
-    if config.service_token:
-        headers["Authorization"] = f"Bearer {config.service_token}"
-
-    payload = {
-        "keywords": merged.keywords,
-        "cities": merged.cities,
-        "resume_link": merged.resume_link,
-        "greeting": merged.greeting,
-        "auto_apply": merged.auto_apply,
-        "auto_greet": merged.auto_greet,
-        "daily_limit": merged.daily_limit,
-    }
-
-    try:
-        response = httpx.post(config.service_url, json=payload, headers=headers, timeout=30.0)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:  # pragma: no cover - 外部服务不易模拟
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"get_jobs 调用失败：{exc}") from exc
-
-    return response.text[:500]
-
-
 # -----------------------------
-# WebSocket 路由（新增）
+# WebSocket
 # -----------------------------
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     token = ws.query_params.get("token")
     if not token:
-        # 兼容部分客户端无法携带查询参数时的头部传递
         auth_header = ws.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
             token = auth_header.split()[1]
@@ -635,13 +554,12 @@ async def ws_endpoint(ws: WebSocket):
             user = get_user_by_token(token, session)
         except HTTPException as exc:
             await ws.accept()
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason=exc.detail)
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(exc.detail))
             return
 
         await ws_manager.connect(user.id, ws)
         try:
             while True:
-                # 客户端可以发 ping 文本，服务端只保持连接即可
                 await ws.receive_text()
         except WebSocketDisconnect:
             ws_manager.disconnect(user.id, ws)
@@ -653,10 +571,14 @@ async def ws_endpoint(ws: WebSocket):
                 pass
 
 
+# -----------------------------
+# Auth endpoints
+# -----------------------------
 @app.post("/auth/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 def register_user(payload: UserCreate, session: Session = Depends(get_session)):
     if not payload.password.strip():
         raise HTTPException(status_code=400, detail="密码不能为空")
+
     existing = session.exec(select(User).where(User.name == payload.name)).first()
     if existing:
         raise HTTPException(status_code=400, detail="用户名已存在")
@@ -671,9 +593,11 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)):
     salt = secrets.token_hex(8)
     password_hash = hash_password(payload.password, salt)
     user = User(name=payload.name, balance=0.0, password_hash=password_hash, salt=salt, role=chosen_role)
+
     session.add(user)
     session.commit()
     session.refresh(user)
+
     increment_register_count()
     return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
 
@@ -683,20 +607,40 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)):
     user = session.exec(select(User).where(User.name == payload.name)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+
     hashed = hash_password(payload.password, user.salt)
     if hashed != user.password_hash:
         raise HTTPException(status_code=401, detail="密码错误")
+
     token = secrets.token_urlsafe(24)
-    token_store[token] = {"user_id": user.id}
+
+    # 可选：给 token 加过期时间，比如 7 天
+    expires_at = datetime.utcnow() + dt.timedelta(days=7)
+
+    record = AuthToken(token=token, user_id=user.id, expires_at=expires_at)
+    session.add(record)
+    session.commit()
+
     register_user_online(token)
+
     public_user = UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
     return LoginResponse(token=token, user=public_user)
 
 
 @app.post("/auth/logout")
-def logout(authorization: str = Header(default=None), user: User = Depends(get_current_user)):
+def logout(
+    authorization: str = Header(default=None),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    # get_current_user 已校验过 Bearer
     token = authorization.split()[1]
-    token_store.pop(token, None)
+
+    record = session.get(AuthToken, token)
+    if record:
+        session.delete(record)
+        session.commit()
+
     logout_user_online(token)
     return {"message": f"{user.name} 已退出"}
 
@@ -706,36 +650,14 @@ def get_me(user: User = Depends(get_current_user)):
     return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
 
 
-@app.post("/users", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-def create_user(user_in: UserCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    if not user_in.password.strip():
-        raise HTTPException(status_code=400, detail="密码不能为空")
-    existing = session.exec(select(User).where(User.name == user_in.name)).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="用户名已存在")
-    role_value = user_in.role.value if user_in.role else Role.user.value
-    salt = secrets.token_hex(8)
-    password_hash = hash_password(user_in.password, salt)
-    user = User(name=user_in.name, balance=0.0, password_hash=password_hash, salt=salt, role=role_value)
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    increment_register_count()
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
-
-
-@app.get("/users", response_model=List[UserPublic])
-def list_users(session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    users = session.exec(select(User)).all()
-    return [UserPublic(id=u.id, name=u.name, balance=u.balance, role=u.role) for u in users]
-
-
+# -----------------------------
+# Users / Contacts / Messages
+# -----------------------------
 @app.get("/contacts", response_model=List[UserContactStatusPublic])
 def list_contacts(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
-    """获取站内互聊联系人列表，排除当前用户。
-    在线状态：token_store（登录态） + ws 连接（更实时）
-    """
-    online_user_ids = {info.get("user_id") for info in token_store.values() if info.get("user_id")}
+    purge_expired_tokens(session)
+    online_user_ids = {r.user_id for r in session.exec(select(AuthToken)).all()}
+
     contacts = session.exec(select(User).where(User.id != user.id)).all()
     return [
         UserContactStatusPublic(
@@ -746,57 +668,6 @@ def list_contacts(session: Session = Depends(get_session), user: User = Depends(
         )
         for item in contacts
     ]
-
-
-@app.get("/users/{user_id}", response_model=UserPublic)
-def get_user(user_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
-
-
-@app.put("/users/{user_id}", response_model=UserPublic)
-def update_user(
-    user_id: int,
-    payload: UserUpdate,
-    session: Session = Depends(get_session),
-    _: User = Depends(require_admin),
-):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if payload.name and payload.name != user.name:
-        exists = session.exec(select(User).where(User.name == payload.name)).first()
-        if exists:
-            raise HTTPException(status_code=400, detail="用户名已存在")
-        user.name = payload.name
-
-    if payload.password is not None:
-        if not payload.password.strip():
-            raise HTTPException(status_code=400, detail="密码不能为空")
-        user.salt = secrets.token_hex(8)
-        user.password_hash = hash_password(payload.password, user.salt)
-
-    if payload.role:
-        user.role = payload.role.value
-
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
-
-
-@app.delete("/users/{user_id}", status_code=204)
-def delete_user(user_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    session.delete(user)
-    session.commit()
-    logging.info("删除用户：%s", user.name)
-    return None
 
 
 @app.get("/contacts/messages/{peer_id}", response_model=List[PeerMessagePublic])
@@ -816,6 +687,7 @@ def get_peer_messages(peer_id: int, session: Session = Depends(get_session), use
         .order_by(PeerMessage.created_at)
     )
     messages = session.exec(query).all()
+
     return [
         PeerMessagePublic(
             id=msg.id,
@@ -830,7 +702,6 @@ def get_peer_messages(peer_id: int, session: Session = Depends(get_session), use
     ]
 
 
-# 改为 async：落库后 WS 推送（关键）
 @app.post("/contacts/messages", response_model=PeerMessagePublic, status_code=status.HTTP_201_CREATED)
 async def create_peer_message(
     payload: PeerMessageCreate,
@@ -863,152 +734,46 @@ async def create_peer_message(
     )
 
     payload_ws = {"type": "peer_message", "data": public_msg.model_dump()}
-
-    # 推送给接收方（实时收到）
     await ws_manager.send_to(receiver.id, payload_ws)
-    # 也推给发送方（其他标签页/设备同步显示）
     await ws_manager.send_to(user.id, payload_ws)
 
     return public_msg
 
 
-@app.put("/users/{user_id}/balance", response_model=UserPublic)
-def update_balance(user_id: int, update: BalanceUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    new_balance = user.balance + update.amount
-    if new_balance < 0:
-        raise HTTPException(status_code=400, detail="Balance cannot be negative")
-    user.balance = new_balance
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
+# -----------------------------
+# Stats / Dashboard
+# -----------------------------
+@app.get("/stats/redis")
+def redis_stats(session: Session = Depends(get_session)):
+    return {
+        "register_count": get_register_count(session),
+        "online_count": get_online_count(session),
+    }
 
 
-@app.post("/models", response_model=ModelConfigPublic, status_code=status.HTTP_201_CREATED)
-def create_model_config(key: ModelConfigCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    existing = session.exec(select(ModelConfig).where(ModelConfig.name == key.name)).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="模型配置名称已存在")
-    if key.owner_id and not session.get(User, key.owner_id):
-        raise HTTPException(status_code=404, detail="绑定用户不存在")
-    model = ModelConfig(
-        name=key.name,
-        base_url=key.base_url,
-        api_key=key.api_key,
-        model_name=key.model_name,
-        max_tokens=key.max_tokens,
-        temperature=key.temperature,
-        owner_id=key.owner_id,
-    )
-    session.add(model)
-    session.commit()
-    session.refresh(model)
-    logging.info("新增大模型配置：%s", model.name)
-    return ModelConfigPublic(
-        id=model.id,
-        name=model.name,
-        base_url=model.base_url,
-        api_key=model.api_key,
-        model_name=model.model_name,
-        max_tokens=model.max_tokens,
-        temperature=model.temperature,
-        owner_id=model.owner_id,
-    )
-
-
-@app.get("/models", response_model=List[ModelConfigPublic])
-def list_models(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
+@app.get("/dashboard")
+def dashboard(request: Request, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    users = session.exec(select(User)).all()
+    total_balance = sum(u.balance for u in users)
     models = session.exec(select(ModelConfig)).all()
-    return [
-        ModelConfigPublic(
-            id=m.id,
-            name=m.name,
-            base_url=m.base_url,
-            api_key=m.api_key,
-            model_name=m.model_name,
-            max_tokens=m.max_tokens,
-            temperature=m.temperature,
-            owner_id=m.owner_id,
-        )
-        for m in models
-    ]
+
+    now = dt.datetime.now()
+    client_ip = request.client.host if request.client else "unknown"
+    weather = "晴朗"
+
+    return {
+        "summary": {"user_count": len(users), "total_balance": total_balance, "model_count": len(models)},
+        "redis": redis_stats(session),
+        "date": now.strftime("%Y-%m-%d %H:%M"),
+        "ip": client_ip,
+        "weather": weather,
+        "me": {"id": user.id, "name": user.name, "role": user.role},
+    }
 
 
-@app.get("/models/{model_id}", response_model=ModelConfigPublic)
-def get_model_config(model_id: int, session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    model = session.get(ModelConfig, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="模型配置不存在")
-    return ModelConfigPublic(
-        id=model.id,
-        name=model.name,
-        base_url=model.base_url,
-        api_key=model.api_key,
-        model_name=model.model_name,
-        max_tokens=model.max_tokens,
-        temperature=model.temperature,
-        owner_id=model.owner_id,
-    )
-
-
-@app.put("/models/{model_id}", response_model=ModelConfigPublic)
-def update_model_config(model_id: int, payload: ModelConfigUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    model = session.get(ModelConfig, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="模型配置不存在")
-
-    if payload.name and payload.name != model.name:
-        existing = session.exec(select(ModelConfig).where(ModelConfig.name == payload.name)).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="模型配置名称已存在")
-        model.name = payload.name
-
-    if payload.owner_id and not session.get(User, payload.owner_id):
-        raise HTTPException(status_code=404, detail="绑定用户不存在")
-
-    if payload.base_url is not None:
-        model.base_url = payload.base_url
-    if payload.api_key is not None:
-        model.api_key = payload.api_key
-    if payload.model_name is not None:
-        model.model_name = payload.model_name
-    if payload.max_tokens is not None:
-        model.max_tokens = payload.max_tokens
-    if payload.temperature is not None:
-        model.temperature = payload.temperature
-    if payload.owner_id is not None:
-        model.owner_id = payload.owner_id
-
-    session.add(model)
-    session.commit()
-    session.refresh(model)
-    logging.info("更新大模型配置：%s", model.name)
-    return ModelConfigPublic(
-        id=model.id,
-        name=model.name,
-        base_url=model.base_url,
-        api_key=model.api_key,
-        model_name=model.model_name,
-        max_tokens=model.max_tokens,
-        temperature=model.temperature,
-        owner_id=model.owner_id,
-    )
-
-
-@app.delete("/models/{model_id}", status_code=204)
-def delete_model_config(model_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    model = session.get(ModelConfig, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="模型配置不存在")
-    session.delete(model)
-    session.commit()
-    logging.info("删除大模型配置：%s", model.name)
-    return None
-
-
+# -----------------------------
+# Chat completions（保留你原逻辑）
+# -----------------------------
 @app.post("/chat/completions", response_model=ChatCompletionResponse)
 def create_chat_completion(payload: ChatCompletionRequest, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     model: Optional[ModelConfig] = None
@@ -1065,7 +830,6 @@ def create_chat_completion(payload: ChatCompletionRequest, session: Session = De
                         json=request_body,
                     ) as upstream_response:
                         if upstream_response.status_code >= 400:
-                            # 主动读取完整响应，避免 httpx 在流模式下抛出 ResponseNotRead
                             error_bytes = upstream_response.read()
                             error_text = error_bytes.decode("utf-8", errors="replace")
                             try:
@@ -1080,7 +844,7 @@ def create_chat_completion(payload: ChatCompletionRequest, session: Session = De
                         for chunk in upstream_response.iter_text():
                             if chunk:
                                 yield chunk
-            except httpx.RequestError as exc:  # pragma: no cover
+            except httpx.RequestError as exc:
                 raise HTTPException(status_code=502, detail=f"请求上游模型失败：{exc}") from exc
 
         return StreamingResponse(stream_response(), media_type="text/event-stream")
@@ -1092,7 +856,7 @@ def create_chat_completion(payload: ChatCompletionRequest, session: Session = De
                 headers={"Authorization": f"Bearer {model.api_key}"},
                 json=request_body,
             )
-    except httpx.RequestError as exc:  # pragma: no cover
+    except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"请求上游模型失败：{exc}") from exc
 
     if upstream_response.status_code >= 400:
@@ -1113,166 +877,9 @@ def create_chat_completion(payload: ChatCompletionRequest, session: Session = De
     return data
 
 
-@app.post("/web/categories", response_model=WebCategoryPublic, status_code=status.HTTP_201_CREATED)
-def create_web_category(payload: WebCategoryCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    existing = session.exec(select(WebCategory).where(WebCategory.name == payload.name)).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="分类名称已存在")
-    category = WebCategory(name=payload.name, description=payload.description)
-    session.add(category)
-    session.commit()
-    session.refresh(category)
-    logging.info("新增网页分类：%s", category.name)
-    return WebCategoryPublic(id=category.id, name=category.name, description=category.description)
-
-
-@app.get("/web/categories", response_model=List[WebCategoryPublic])
-def list_web_categories(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    categories = session.exec(select(WebCategory)).all()
-    return [WebCategoryPublic(id=c.id, name=c.name, description=c.description) for c in categories]
-
-
-@app.delete("/web/categories/{category_id}", status_code=204)
-def delete_web_category(category_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    category = session.get(WebCategory, category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="分类不存在")
-    pages = session.exec(select(WebPage).where(WebPage.category_id == category_id)).all()
-    for page in pages:
-        session.delete(page)
-    session.delete(category)
-    session.commit()
-    logging.info("删除网页分类：%s", category.name)
-    return None
-
-
-@app.post("/web/pages", response_model=WebPagePublic, status_code=status.HTTP_201_CREATED)
-def create_web_page(payload: WebPageCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    category = session.get(WebCategory, payload.category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="分类不存在")
-    page = WebPage(
-        category_id=payload.category_id,
-        url=payload.url,
-        account=payload.account,
-        password=payload.password,
-        cookie=payload.cookie,
-        note=payload.note,
-    )
-    session.add(page)
-    session.commit()
-    session.refresh(page)
-    logging.info("分类 %s 新增网页：%s", category.name, page.url)
-    return WebPagePublic(
-        id=page.id,
-        category_id=page.category_id,
-        url=page.url,
-        account=page.account,
-        password=page.password,
-        cookie=page.cookie,
-        note=page.note,
-    )
-
-
-@app.get("/web/pages", response_model=List[WebPagePublic])
-def list_web_pages(category_id: Optional[int] = None, session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    query = select(WebPage)
-    if category_id:
-        query = query.where(WebPage.category_id == category_id)
-    pages = session.exec(query).all()
-    return [
-        WebPagePublic(
-            id=p.id,
-            category_id=p.category_id,
-            url=p.url,
-            account=p.account,
-            password=p.password,
-            cookie=p.cookie,
-            note=p.note,
-        )
-        for p in pages
-    ]
-
-
-@app.delete("/web/pages/{page_id}", status_code=204)
-def delete_web_page(page_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    page = session.get(WebPage, page_id)
-    if not page:
-        raise HTTPException(status_code=404, detail="网页记录不存在")
-    session.delete(page)
-    session.commit()
-    logging.info("删除网页：%s", page.url)
-    return None
-
-
-@app.get("/summary")
-def summary(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    users = session.exec(select(User)).all()
-    total_balance = sum(user.balance for user in users)
-    models = session.exec(select(ModelConfig)).all()
-    return {"user_count": len(users), "total_balance": total_balance, "model_count": len(models)}
-
-
-@app.get("/roles")
-def list_roles(session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    users = session.exec(select(User)).all()
-    stats: Dict[str, int] = {role.value: 0 for role in Role}
-    for u in users:
-        stats[u.role] = stats.get(u.role, 0) + 1
-    return {"roles": stats}
-
-
-@app.get("/role-prompts", response_model=List[RolePromptPublic])
-def list_role_prompts(session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    prompts = session.exec(select(RolePrompt).order_by(RolePrompt.id)).all()
-    return [RolePromptPublic(id=p.id, name=p.name, prompt=p.prompt) for p in prompts]
-
-
-@app.post("/role-prompts", response_model=RolePromptPublic, status_code=status.HTTP_201_CREATED)
-def create_role_prompt(payload: RolePromptCreate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    existing = session.exec(select(RolePrompt).where(RolePrompt.name == payload.name)).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="提示词名称已存在")
-    record = RolePrompt(name=payload.name, prompt=payload.prompt)
-    session.add(record)
-    session.commit()
-    session.refresh(record)
-    logging.info("新增提示词角色：%s", record.name)
-    return RolePromptPublic(id=record.id, name=record.name, prompt=record.prompt)
-
-
-@app.put("/role-prompts/{prompt_id}", response_model=RolePromptPublic)
-def update_role_prompt(prompt_id: int, payload: RolePromptUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    record = session.get(RolePrompt, prompt_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="提示词不存在")
-
-    if payload.name and payload.name != record.name:
-        exists = session.exec(select(RolePrompt).where(RolePrompt.name == payload.name)).first()
-        if exists:
-            raise HTTPException(status_code=400, detail="提示词名称已存在")
-        record.name = payload.name
-    if payload.prompt is not None:
-        record.prompt = payload.prompt
-
-    session.add(record)
-    session.commit()
-    session.refresh(record)
-    logging.info("更新提示词角色：%s", record.name)
-    return RolePromptPublic(id=record.id, name=record.name, prompt=record.prompt)
-
-
-@app.delete("/role-prompts/{prompt_id}", status_code=204)
-def delete_role_prompt(prompt_id: int, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    record = session.get(RolePrompt, prompt_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="提示词不存在")
-    session.delete(record)
-    session.commit()
-    logging.info("删除提示词角色：%s", record.name)
-    return None
-
-
+# -----------------------------
+# Logs
+# -----------------------------
 def read_logs(max_lines: int = 200) -> List[str]:
     if not LOG_FILE.exists():
         return []
@@ -1283,106 +890,3 @@ def read_logs(max_lines: int = 200) -> List[str]:
 @app.get("/logs")
 def get_logs(limit: int = 200, _: User = Depends(require_admin)):
     return {"lines": read_logs(max_lines=max(10, min(limit, 1000)))}
-
-
-@app.post("/roles/assign")
-def assign_role(payload: RoleUpdate, session: Session = Depends(get_session), _: User = Depends(require_admin)):
-    user = session.get(User, payload.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    user.role = payload.role.value
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
-
-
-@app.get("/stats/redis")
-def redis_stats():
-    return {"register_count": get_register_count(), "online_count": get_online_count()}
-
-
-@app.get("/dashboard")
-def dashboard(request: Request, session: Session = Depends(get_session), _: User = Depends(get_current_user)):
-    summary_data = summary(session, _)  # type: ignore[arg-type]
-    now = dt.datetime.now()
-    client_ip = request.client.host if request.client else "unknown"
-    weather = "晴朗"
-    return {
-        "summary": summary_data,
-        "redis": redis_stats(),
-        "date": now.strftime("%Y-%m-%d %H:%M"),
-        "ip": client_ip,
-        "weather": weather,
-    }
-
-
-@app.get("/job-helper/config", response_model=JobAutomationConfigPublic)
-def get_job_helper_config(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    return get_job_config(session)
-
-
-@app.put("/job-helper/config", response_model=JobAutomationConfigPublic)
-def update_job_helper_config(
-    payload: JobAutomationConfigUpdate,
-    session: Session = Depends(get_session),
-    _: User = Depends(require_admin),
-):
-    config = get_job_config(session)
-    for field, value in payload.dict(exclude_unset=True).items():
-        setattr(config, field, value)
-    session.add(config)
-    session.commit()
-    session.refresh(config)
-    return config
-
-
-@app.post("/job-helper/run", response_model=JobRunPublic)
-def trigger_job_helper(
-    payload: JobRunRequest,
-    session: Session = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
-    config = get_job_config(session)
-    merged = merge_job_config(config, payload)
-
-    job_run = JobRun(
-        status="pending",
-        message="正在提交到 get_jobs...",
-        requested_by=user.id,
-        keywords=merged.keywords,
-        cities=merged.cities,
-        resume_link=merged.resume_link,
-        greeting=merged.greeting,
-        auto_apply=merged.auto_apply,
-        auto_greet=merged.auto_greet,
-        daily_limit=merged.daily_limit,
-    )
-    session.add(job_run)
-    session.commit()
-    session.refresh(job_run)
-
-    try:
-        reply_text = call_get_jobs(config=config, merged=merged)
-        job_run.status = "success"
-        job_run.message = reply_text or "提交成功"
-    except HTTPException as exc:
-        job_run.status = "failed"
-        job_run.message = str(exc.detail)
-        job_run.finished_at = datetime.utcnow()
-        session.add(job_run)
-        session.commit()
-        session.refresh(job_run)
-        raise
-
-    job_run.finished_at = datetime.utcnow()
-    session.add(job_run)
-    session.commit()
-    session.refresh(job_run)
-    return job_run
-
-
-@app.get("/job-helper/runs", response_model=List[JobRunPublic])
-def list_job_runs(user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    statement = select(JobRun).order_by(JobRun.requested_at.desc()).limit(50)
-    return list(session.exec(statement))
