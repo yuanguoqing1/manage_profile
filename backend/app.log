@@ -16,3 +16,4 @@
 2025-12-20 00:37:35,226 [INFO] WS connect user_id=1 connections=1
 2025-12-20 00:51:00,092 [INFO] WS disconnect user_id=1 remain=0
 2025-12-20 00:51:00,212 [INFO] WS connect user_id=1 connections=1
+2025-12-20 03:47:52,968 [INFO] WS disconnect user_id=1 remain=0
