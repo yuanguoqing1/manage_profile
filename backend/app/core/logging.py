@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import logging.config
 from pathlib import Path
 from typing import List
 
@@ -10,10 +11,30 @@ LOG_FILE = Path("app.log")
 
 
 def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE, encoding="utf-8")],
+    formatter = {"format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"}
+    handlers = {
+        "console": {"class": "logging.StreamHandler", "formatter": "default"},
+        "file": {
+            "class": "logging.FileHandler",
+            "formatter": "default",
+            "filename": str(LOG_FILE),
+            "encoding": "utf-8",
+        },
+    }
+    logging.config.dictConfig(
+        {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {"default": formatter},
+            "handlers": handlers,
+            "root": {"level": "DEBUG", "handlers": ["console", "file"]},
+            "loggers": {
+                "uvicorn": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
+                "uvicorn.error": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
+                "uvicorn.access": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
+                "fastapi": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
+            },
+        }
     )
 
 
