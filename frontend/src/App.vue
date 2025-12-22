@@ -3,7 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { routes } from './router'
 import { startChristmasEffects, stopChristmasEffects } from './utils/christmasEffects'
 
-const apiBase = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8001'
+const apiBase = import.meta.env.DEV
+  ? (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8001')
+  : '/api'
 
 const loading = ref(false)
 const chatLoading = ref(false)
