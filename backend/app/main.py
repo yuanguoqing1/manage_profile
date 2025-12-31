@@ -11,6 +11,7 @@ setup_logging()
 
 from app.api.router import api_router  # noqa: E402
 from app.services.ws_manager import ws_manager  # noqa: E402
+from app.services.memory_service import init_memory  # noqa: E402
 
 app = FastAPI(title=settings.app_title, version=settings.app_version)
 app.add_middleware(
@@ -25,6 +26,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     create_db_and_tables()
+    init_memory()  # 初始化AI记忆服务
 
 
 @app.on_event("shutdown")

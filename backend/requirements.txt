@@ -4,6 +4,7 @@ sqlmodel==0.0.21
 redis==5.0.7
 httpx==0.27.0
 pymysql
+powermem
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-cov==4.1.0

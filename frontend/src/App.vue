@@ -52,6 +52,19 @@ const mapInstance = ref(null)
 const userLocation = ref(null)
 const locationError = ref('')
 const mapMarker = ref(null)
+const isRequestingLocation = ref(false)
+const showManualLocationInput = ref(false)
+const manualAddress = ref('')
+const manualLng = ref('')
+const manualLat = ref('')
+
+// 地图AI聊天状态
+const mapChatMessages = ref([])
+const mapChatInput = ref('')
+const mapChatLoading = ref(false)
+
+// 聊天消息容器ref
+const chatBodyRef = ref(null)
 
 const defaultRolePrompt =
   '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
@@ -68,6 +81,7 @@ const modals = ref({
   model: false,
   category: false,
   page: false,
+  pageEdit: false,
   role: false,
   rolePrompt: false,
   rolePromptEdit: false,
@@ -102,6 +116,7 @@ const forms = ref({
   },
   category: { name: '', description: '' },
   page: { category_id: '', url: '', account: '', password: '', cookie: '', note: '' },
+  editPage: { id: null, category_id: '', url: '', account: '', password: '', cookie: '', note: '' },
   balance: { userId: '', amount: 0 },
   role: { user_id: '', role: 'user' },
   rolePrompt: { name: '', prompt: '' },
@@ -141,12 +156,19 @@ const availableContacts = computed(() => {
 
 const selectedPeer = computed(() => contacts.value.find((item) => item.id === selectedPeerId.value) || null)
 
+let statusTimer = null
 function setStatus(type, message) {
+  // 清除之前的定时器，避免重复
+  if (statusTimer) {
+    clearTimeout(statusTimer)
+    statusTimer = null
+  }
   status.value = { type, message }
   if (message) {
-    setTimeout(() => {
+    statusTimer = setTimeout(() => {
       status.value = { type: '', message: '' }
-    }, 3200)
+      statusTimer = null
+    }, 2500) // 缩短显示时间
   }
 }
 
@@ -172,6 +194,11 @@ function clearAuth() {
   lastPreviewMap.value = {}
   localStorage.removeItem('token')
   localStorage.removeItem('user')
+}
+
+function truncateUrl(url, maxLen = 40) {
+  if (!url || url.length <= maxLen) return url
+  return url.slice(0, maxLen) + '...'
 }
 
 function escapeHtml(input) {
@@ -232,6 +259,15 @@ function navigateTo(menu, options = {}) {
   if (target.requiresAdmin && !isAdmin.value) return
   if (target.requiresAuth && !isAuthed.value) return
   activeMenu.value = target.menu
+  
+  // 如果切换到地图页面，需要调整地图大小
+  if (menu === 'map' && mapLoaded.value && mapInstance.value) {
+    // 使用nextTick确保DOM已更新
+    setTimeout(() => {
+      mapInstance.value.resize()
+    }, 100)
+  }
+  
   if (typeof window === 'undefined') return
   const url = `#${target.path}`
   if (options.replace) window.history.replaceState(null, '', url)
@@ -658,6 +694,43 @@ async function deletePage(id) {
   }
 }
 
+function openEditPage(page) {
+  forms.value.editPage = {
+    id: page.id,
+    category_id: page.category_id,
+    url: page.url,
+    account: page.account || '',
+    password: page.password || '',
+    cookie: page.cookie || '',
+    note: page.note || '',
+  }
+  modals.value.pageEdit = true
+}
+
+async function updatePage() {
+  if (!forms.value.editPage.id) return
+  try {
+    const payload = {
+      category_id: Number(forms.value.editPage.category_id),
+      url: forms.value.editPage.url,
+      account: forms.value.editPage.account,
+      password: forms.value.editPage.password,
+      cookie: forms.value.editPage.cookie,
+      note: forms.value.editPage.note,
+    }
+    await request(`/web/pages/${forms.value.editPage.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+    setStatus('success', '网页信息已更新')
+    modals.value.pageEdit = false
+    forms.value.editPage = { id: null, category_id: '', url: '', account: '', password: '', cookie: '', note: '' }
+    await fetchPages(selectedCategory.value?.id || null)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
 async function assignRole() {
   try {
     await request('/roles/assign', {
@@ -812,32 +885,101 @@ function loadAmapScript() {
       resolve(window.AMap)
       return
     }
-    const script = document.createElement('script')
+    
     // 从环境变量读取高德地图 API Key
     const amapKey = import.meta.env.VITE_AMAP_KEY || 'YOUR_AMAP_KEY'
+    const amapSecret = import.meta.env.VITE_AMAP_SECRET || ''
+    
+    // 检查 API Key 是否配置
+    if (!amapKey || amapKey === 'YOUR_AMAP_KEY' || amapKey === 'your_amap_web_key_here') {
+      reject(new Error('请先在 .env 文件中配置 VITE_AMAP_KEY'))
+      return
+    }
+    
+    // 输出配置信息到控制台
+    console.log('=== 高德地图配置 ===')
+    console.log('API Key:', amapKey)
+    console.log('安全密钥已配置:', amapSecret ? '是' : '否')
+    console.log('==================')
+    console.log('如果地图加载失败，请检查：')
+    console.log('1. 访问 https://console.amap.com/')
+    console.log('2. 确保Key类型是 "Web端(JS API)" 不是 "Web服务"')
+    console.log('3. 在Key设置中生成"安全密钥(seccode)"并配置到VITE_AMAP_SECRET')
+    console.log('4. 重启前端服务: npm run dev')
+    console.log('==================')
+    
+    // 配置安全密钥
+    if (amapSecret && amapSecret !== 'your_amap_secret_here') {
+      window._AMapSecurityConfig = {
+        securityJsCode: amapSecret,
+      }
+    }
+    
+    const script = document.createElement('script')
     script.src = `https://webapi.amap.com/maps?v=2.0&key=${amapKey}`
     script.async = true
-    script.onload = () => resolve(window.AMap)
-    script.onerror = () => reject(new Error('高德地图加载失败，请检查API Key是否正确'))
+    script.onload = () => {
+      if (window.AMap) {
+        resolve(window.AMap)
+      } else {
+        reject(new Error('高德地图脚本加载成功但 AMap 对象未定义'))
+      }
+    }
+    script.onerror = () => reject(new Error('高德地图脚本加载失败，请检查网络连接和API Key'))
     document.head.appendChild(script)
   })
 }
 
 async function initMap() {
-  if (mapLoaded.value) return
+  // 每次都重新初始化，不检查mapLoaded
   
   try {
     const AMap = await loadAmapScript()
     
-    // 创建地图实例
+    // 如果已有地图实例，先销毁
+    if (mapInstance.value) {
+      try {
+        mapInstance.value.destroy()
+      } catch (e) {
+        console.log('销毁旧地图实例:', e)
+      }
+    }
+    
+    // 创建地图实例 - 优化性能配置
     mapInstance.value = new AMap.Map('amap-container', {
-      zoom: 15,
+      zoom: 13,
       center: [116.397428, 39.90923], // 默认北京
-      viewMode: '3D',
-      pitch: 50,
+      viewMode: '2D', // 改为2D模式，性能更好
+      pitch: 0,
+      // 性能优化配置
+      resizeEnable: true,
+      rotateEnable: false, // 禁用旋转
+      pitchEnable: false, // 禁用倾斜
+      dragEnable: true,
+      zoomEnable: true,
+      doubleClickZoom: true,
+      keyboardEnable: false, // 禁用键盘控制
+      jogEnable: false, // 禁用惯性拖拽
+      scrollWheel: true,
+      touchZoom: true,
+      // 地图样式 - 使用轻量级样式
+      mapStyle: 'amap://styles/normal',
+      features: ['bg', 'road', 'building', 'point'], // 添加point显示地名标注
+      // 缩放动画
+      animateEnable: false, // 禁用动画，提升性能
+    })
+    
+    // 监听地图错误
+    mapInstance.value.on('error', (e) => {
+      console.error('地图错误:', e)
+      if (e.info && e.info.includes('ENGINE_RESPONSE_DATA_ERROR')) {
+        locationError.value = 'API Key配置错误：请确保使用Web端(JS API)类型的Key，并正确配置安全密钥'
+        setStatus('error', '地图API配置错误，请检查控制台的配置说明')
+      }
     })
     
     mapLoaded.value = true
+    console.log('地图初始化完成')
     
     // 获取用户位置
     getUserLocation()
@@ -856,9 +998,15 @@ function getUserLocation() {
   // 使用高德地图定位插件
   AMap.plugin('AMap.Geolocation', () => {
     const geolocation = new AMap.Geolocation({
-      enableHighAccuracy: true,
-      timeout: 10000,
-      zoomToAccuracy: true,
+      enableHighAccuracy: false, // 改为false，提升速度
+      timeout: 5000, // 减少超时时间
+      zoomToAccuracy: false, // 禁用自动缩放
+      convert: true,
+      showButton: false,
+      showMarker: false,
+      showCircle: false,
+      noIpLocate: 0,
+      GeoLocationFirst: false // 优先使用IP定位，更快
     })
     
     geolocation.getCurrentPosition((status, result) => {
@@ -871,10 +1019,10 @@ function getUserLocation() {
           city: result.addressComponent?.city || '未知城市',
         }
         
-        // 设置地图中心
+        // 设置地图中心（不使用动画）
         mapInstance.value.setCenter([lng, lat])
         
-        // 添加标记
+        // 添加标记（使用简单标记，不加载图片）
         if (mapMarker.value) {
           mapMarker.value.setMap(null)
         }
@@ -882,35 +1030,203 @@ function getUserLocation() {
         mapMarker.value = new AMap.Marker({
           position: [lng, lat],
           title: '我的位置',
-          icon: new AMap.Icon({
-            size: new AMap.Size(40, 50),
-            image: '//a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-default.png',
-            imageSize: new AMap.Size(40, 50),
-          }),
+          // 不使用自定义图标，使用默认标记（性能更好）
         })
         
         mapInstance.value.add(mapMarker.value)
         
-        // 添加信息窗体
-        const infoWindow = new AMap.InfoWindow({
-          content: `<div style="padding: 10px;">
-            <h4 style="margin: 0 0 8px 0;">我的位置</h4>
-            <p style="margin: 4px 0;">经度：${lng.toFixed(6)}</p>
-            <p style="margin: 4px 0;">纬度：${lat.toFixed(6)}</p>
-            <p style="margin: 4px 0;">地址：${userLocation.value.address}</p>
-          </div>`,
+        // 不自动打开信息窗体，减少渲染
+        // 用户可以点击标记查看详情
+        mapMarker.value.on('click', () => {
+          const infoWindow = new AMap.InfoWindow({
+            content: `<div style="padding: 10px;">
+              <h4 style="margin: 0 0 8px 0;">我的位置</h4>
+              <p style="margin: 4px 0;">经度：${lng.toFixed(6)}</p>
+              <p style="margin: 4px 0;">纬度：${lat.toFixed(6)}</p>
+              <p style="margin: 4px 0;">地址：${userLocation.value.address}</p>
+            </div>`,
           offset: new AMap.Pixel(0, -30),
         })
         
-        infoWindow.open(mapInstance.value, [lng, lat])
-        
         setStatus('success', '定位成功')
+        
+          infoWindow.open(mapInstance.value, [lng, lat])
+        })
       } else {
-        locationError.value = '定位失败：' + result.message
-        setStatus('error', '定位失败，请检查浏览器定位权限')
+        // 定位失败，使用默认位置（北京）
+        const defaultLng = 116.397428
+        const defaultLat = 39.90923
+        
+        userLocation.value = {
+          lng: defaultLng,
+          lat: defaultLat,
+          address: '自动定位失败，显示默认位置（北京天安门）',
+          city: '北京市',
+        }
+        
+        // 设置地图中心到默认位置
+        mapInstance.value.setCenter([defaultLng, defaultLat])
+        
+        // 添加默认位置标记
+        if (mapMarker.value) {
+          mapMarker.value.setMap(null)
+        }
+        
+        mapMarker.value = new AMap.Marker({
+          position: [defaultLng, defaultLat],
+          title: '默认位置',
+        })
+        
+        mapInstance.value.add(mapMarker.value)
+        
+        // 清空错误信息，不显示为错误
+        locationError.value = ''
+        setStatus('info', '💡 自动定位失败，已显示默认位置。点击"请求定位权限"按钮手动授权定位')
       }
     })
   })
+}
+
+// 主动请求浏览器定位权限
+async function requestBrowserLocation() {
+  if (isRequestingLocation.value) return
+  
+  isRequestingLocation.value = true
+  locationError.value = ''
+  
+  try {
+    // 检查浏览器是否支持地理定位
+    if (!navigator.geolocation) {
+      throw new Error('您的浏览器不支持地理定位功能')
+    }
+    
+    // 检查当前协议
+    const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    
+    if (!isSecure) {
+      setStatus('warning', '⚠️ 定位功能需要 HTTPS 或 localhost 环境。当前使用：' + window.location.protocol)
+      locationError.value = '定位功能需要安全上下文（HTTPS 或 localhost）'
+      isRequestingLocation.value = false
+      return
+    }
+    
+    // 先检查权限状态
+    if (navigator.permissions) {
+      try {
+        const permissionStatus = await navigator.permissions.query({ name: 'geolocation' })
+        console.log('当前定位权限状态：', permissionStatus.state)
+        
+        if (permissionStatus.state === 'denied') {
+          setStatus('error', '❌ 定位权限已被拒绝，请在浏览器设置中手动开启')
+          locationError.value = '定位权限已被拒绝。请点击地址栏左侧的图标 → 网站设置 → 位置 → 允许'
+          isRequestingLocation.value = false
+          return
+        }
+      } catch (e) {
+        console.log('无法查询权限状态：', e)
+      }
+    }
+    
+    setStatus('info', '正在请求定位权限...')
+    console.log('开始请求定位权限...')
+    
+    // 使用浏览器原生定位API请求权限
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { longitude: lng, latitude: lat } = position.coords
+        
+        setStatus('success', '定位权限已授予，正在获取详细地址...')
+        
+        // 如果地图已加载，使用高德API进行逆地理编码获取地址
+        if (window.AMap && mapLoaded.value) {
+          try {
+            const geocoder = new window.AMap.Geocoder()
+            geocoder.getAddress([lng, lat], (status, result) => {
+              if (status === 'complete' && result.info === 'OK') {
+                const addressComponent = result.regeocode.addressComponent
+                userLocation.value = {
+                  lng,
+                  lat,
+                  address: result.regeocode.formattedAddress,
+                  city: addressComponent.city || addressComponent.province,
+                }
+                
+                // 更新地图中心和标记
+                mapInstance.value.setCenter([lng, lat])
+                
+                if (mapMarker.value) {
+                  mapMarker.value.setMap(null)
+                }
+                
+                mapMarker.value = new window.AMap.Marker({
+                  position: [lng, lat],
+                  title: '我的位置',
+                })
+                
+                mapInstance.value.add(mapMarker.value)
+                
+                setStatus('success', '✓ 定位成功！')
+              } else {
+                // 逆地理编码失败，仍然显示坐标
+                userLocation.value = {
+                  lng,
+                  lat,
+                  address: '地址解析中...',
+                  city: '未知',
+                }
+                setStatus('success', '定位成功，但地址解析失败')
+              }
+            })
+          } catch (err) {
+            userLocation.value = {
+              lng,
+              lat,
+              address: '地址解析失败',
+              city: '未知',
+            }
+            setStatus('warning', '定位成功，但地址解析失败')
+          }
+        } else {
+          // 地图未加载，只显示坐标
+          userLocation.value = {
+            lng,
+            lat,
+            address: '请先初始化地图以获取详细地址',
+            city: '未知',
+          }
+          setStatus('success', '✓ 定位成功！')
+        }
+      },
+      (error) => {
+        let errorMsg = ''
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMsg = '用户拒绝了定位请求。请在浏览器设置中允许定位权限'
+            break
+          case error.POSITION_UNAVAILABLE:
+            errorMsg = '位置信息不可用'
+            break
+          case error.TIMEOUT:
+            errorMsg = '定位请求超时'
+            break
+          default:
+            errorMsg = '未知错误：' + error.message
+        }
+        locationError.value = errorMsg
+        setStatus('error', '定位失败：' + errorMsg)
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    )
+  } catch (error) {
+    locationError.value = error.message
+    setStatus('error', '定位失败：' + error.message)
+  } finally {
+    isRequestingLocation.value = false
+  }
 }
 
 function refreshLocation() {
@@ -919,6 +1235,268 @@ function refreshLocation() {
     return
   }
   getUserLocation()
+}
+
+// 搜索地址并定位
+async function searchAddress() {
+  if (!manualAddress.value.trim()) return
+  
+  // 如果地图未加载，先初始化
+  if (!mapLoaded.value) {
+    setStatus('info', '正在初始化地图...')
+    await initMap()
+    // 等待地图加载完成
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+  
+  const AMap = window.AMap
+  if (!AMap) {
+    setStatus('error', '地图加载失败，请刷新页面重试')
+    return
+  }
+  
+  setStatus('info', '正在搜索地址...')
+  
+  AMap.plugin('AMap.Geocoder', () => {
+    const geocoder = new AMap.Geocoder()
+    
+    geocoder.getLocation(manualAddress.value, (status, result) => {
+      if (status === 'complete' && result.info === 'OK') {
+        const location = result.geocodes[0].location
+        const lng = location.lng
+        const lat = location.lat
+        
+        userLocation.value = {
+          lng,
+          lat,
+          address: result.geocodes[0].formattedAddress,
+          city: result.geocodes[0].addressComponent.city || result.geocodes[0].addressComponent.province,
+        }
+        
+        // 更新地图
+        mapInstance.value.setCenter([lng, lat])
+        
+        if (mapMarker.value) {
+          mapMarker.value.setMap(null)
+        }
+        
+        mapMarker.value = new AMap.Marker({
+          position: [lng, lat],
+          title: '搜索位置',
+        })
+        
+        mapInstance.value.add(mapMarker.value)
+        
+        locationError.value = ''
+        setStatus('success', '✓ 地址搜索成功！')
+        showManualLocationInput.value = false
+      } else {
+        setStatus('error', '地址搜索失败，请检查地址是否正确')
+      }
+    })
+  })
+}
+
+// 设置手动输入的坐标
+async function setManualLocation() {
+  const lng = parseFloat(manualLng.value)
+  const lat = parseFloat(manualLat.value)
+  
+  if (isNaN(lng) || isNaN(lat)) {
+    setStatus('error', '请输入有效的经纬度')
+    return
+  }
+  
+  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+    setStatus('error', '经纬度范围错误（经度：-180~180，纬度：-90~90）')
+    return
+  }
+  
+  // 如果地图未加载，先初始化
+  if (!mapLoaded.value) {
+    setStatus('info', '正在初始化地图...')
+    await initMap()
+    // 等待地图加载完成
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+  
+  const AMap = window.AMap
+  if (!AMap) {
+    setStatus('error', '地图加载失败，请刷新页面重试')
+    return
+  }
+  
+  setStatus('info', '正在解析地址...')
+  
+  // 逆地理编码获取地址
+  AMap.plugin('AMap.Geocoder', () => {
+    const geocoder = new AMap.Geocoder()
+    
+    geocoder.getAddress([lng, lat], (status, result) => {
+      if (status === 'complete' && result.info === 'OK') {
+        const addressComponent = result.regeocode.addressComponent
+        userLocation.value = {
+          lng,
+          lat,
+          address: result.regeocode.formattedAddress,
+          city: addressComponent.city || addressComponent.province,
+        }
+      } else {
+        userLocation.value = {
+          lng,
+          lat,
+          address: '地址解析失败',
+          city: '未知',
+        }
+      }
+      
+      // 更新地图
+      mapInstance.value.setCenter([lng, lat])
+      
+      if (mapMarker.value) {
+        mapMarker.value.setMap(null)
+      }
+      
+      mapMarker.value = new AMap.Marker({
+        position: [lng, lat],
+        title: '手动位置',
+      })
+      
+      mapInstance.value.add(mapMarker.value)
+      
+      locationError.value = ''
+      setStatus('success', '✓ 位置设置成功！')
+      showManualLocationInput.value = false
+    })
+  })
+}
+
+// ---------------------------
+// 地图AI聊天功能
+// ---------------------------
+function formatMapChat(content) {
+  if (!content) return ''
+  // 简单的换行处理
+  return content.replace(/\n/g, '<br>')
+}
+
+async function askMapAI(question) {
+  if (!question.trim()) return
+  
+  // 获取当前位置信息
+  const locationInfo = userLocation.value 
+    ? `当前位置：${userLocation.value.address}，城市：${userLocation.value.city}` 
+    : '位置未知'
+  
+  const fullQuestion = `${locationInfo}。请推荐${question}，给出具体的名称、地址和简短介绍。`
+  
+  mapChatInput.value = ''
+  mapChatMessages.value.push({ role: 'user', content: question })
+  mapChatLoading.value = true
+  
+  try {
+    // 使用现有的AI聊天接口
+    const modelId = chatModelId.value || (models.value.length > 0 ? models.value[0].id : null)
+    
+    if (!modelId) {
+      mapChatMessages.value.push({ 
+        role: 'assistant', 
+        content: '❌ 请先在"大模型"页面配置AI模型' 
+      })
+      mapChatLoading.value = false
+      return
+    }
+    
+    const response = await fetch(`${apiBase}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({
+        model_id: modelId,
+        stream: true,
+        messages: [
+          { role: 'system', content: '你是一个本地生活助手，根据用户的位置信息推荐附近的美食、景点、酒店等。回答要简洁实用，包含具体名称和简短介绍。' },
+          { role: 'user', content: fullQuestion }
+        ],
+      }),
+    })
+    
+    if (!response.ok) {
+      const text = await response.text()
+      // 检测Cloudflare验证页面
+      if (text.includes('Just a moment') || text.includes('challenge-platform')) {
+        throw new Error('API被Cloudflare拦截，请检查模型配置或更换API')
+      }
+      // 解析错误详情
+      let errorMsg = `请求失败 (${response.status})`
+      try {
+        const errorData = JSON.parse(text)
+        if (errorData.detail) {
+          errorMsg = errorData.detail
+          // 如果是404错误，提供更详细的提示
+          if (response.status === 404 && errorMsg.includes('上游错误')) {
+            errorMsg += '\n\n💡 提示：请检查大模型配置中的 base_url 是否正确。\n常见格式：\n• OpenAI: https://api.openai.com\n• 本地Ollama: http://localhost:11434\n\n注意：base_url 不需要包含 /v1/chat/completions'
+          }
+        }
+      } catch (e) {
+        errorMsg = text || errorMsg
+      }
+      throw new Error(errorMsg)
+    }
+    
+    // 处理流式响应
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('浏览器不支持流式读取')
+    }
+    
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let assistantContent = ''
+    
+    mapChatMessages.value.push({ role: 'assistant', content: '' })
+    const assistantIndex = mapChatMessages.value.length - 1
+    
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue
+        const jsonStr = line.slice(5).trim()
+        if (jsonStr === '[DONE]') continue
+        
+        try {
+          const data = JSON.parse(jsonStr)
+          const delta = data.choices?.[0]?.delta?.content || ''
+          assistantContent += delta
+          mapChatMessages.value[assistantIndex].content = assistantContent
+        } catch (e) {
+          // 忽略解析错误
+        }
+      }
+      
+      if (done) break
+    }
+    
+  } catch (error) {
+    mapChatMessages.value.push({ 
+      role: 'assistant', 
+      content: `❌ 请求失败：${error.message}` 
+    })
+  } finally {
+    mapChatLoading.value = false
+  }
+}
+
+function sendMapChat() {
+  if (!mapChatInput.value.trim()) return
+  askMapAI(mapChatInput.value)
 }
 
 // ---------------------------
@@ -931,6 +1509,7 @@ async function handleStreamResponse(response, assistantIndex) {
   }
   const decoder = new TextDecoder()
   let buffer = ''
+  let scrollCounter = 0
   while (true) {
     const { value, done } = await reader.read()
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
@@ -941,6 +1520,7 @@ async function handleStreamResponse(response, assistantIndex) {
       if (!line.startsWith('data:')) continue
       const dataStr = line.replace(/^data:\s*/, '')
       if (dataStr === '[DONE]') {
+        scrollChatToBottom()
         return
       }
       try {
@@ -949,6 +1529,11 @@ async function handleStreamResponse(response, assistantIndex) {
           parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.message?.content || ''
         if (delta) {
           chatMessages.value[assistantIndex].content += delta
+          // 每10次更新滚动一次，避免频繁滚动
+          scrollCounter++
+          if (scrollCounter % 10 === 0) {
+            scrollChatToBottom()
+          }
         }
       } catch (err) {
         console.warn('流式解析失败：', err)
@@ -956,6 +1541,16 @@ async function handleStreamResponse(response, assistantIndex) {
     }
     if (done) break
   }
+  scrollChatToBottom()
+}
+
+// 滚动聊天消息到底部
+function scrollChatToBottom() {
+  setTimeout(() => {
+    if (chatBodyRef.value) {
+      chatBodyRef.value.scrollTop = chatBodyRef.value.scrollHeight
+    }
+  }, 50)
 }
 
 async function sendChat() {
@@ -973,7 +1568,9 @@ async function sendChat() {
   chatInput.value = ''
   const userMessage = { role: 'user', content: question }
   chatMessages.value.push(userMessage)
+  scrollChatToBottom() // 发送后滚动到底部
   const assistantIndex = chatMessages.value.push({ role: 'assistant', content: 'AI 正在生成中…' }) - 1
+  scrollChatToBottom() // AI回复开始时滚动
   try {
     const headers = { 'Content-Type': 'application/json' }
     if (token.value) headers.Authorization = `Bearer ${token.value}`
@@ -1291,6 +1888,17 @@ onBeforeUnmount(() => {
 watch([isAuthed, isAdmin], () => {
   syncRouteFromLocation()
 })
+
+// 监听activeMenu变化，当切换到地图页面时自动初始化
+watch(activeMenu, (newMenu, oldMenu) => {
+  if (newMenu === 'map') {
+    console.log('进入地图页面，自动初始化地图')
+    // 延迟一下确保DOM已渲染
+    setTimeout(() => {
+      initMap()
+    }, 100)
+  }
+})
 </script>
 
 <template>
@@ -1342,7 +1950,7 @@ watch([isAuthed, isAdmin], () => {
       <header class="topbar">
         <div>
           <p class="eyebrow">管理控制台</p>
-          <h1>数据面板 · 精准分区</h1>
+          <h1>数据面板</h1>
         </div>
         <div class="top-actions">
           <button class="ghost" @click="toggleChristmas">
@@ -1578,7 +2186,7 @@ watch([isAuthed, isAdmin], () => {
                 </div>
               </div>
 
-              <div class="wechat-body">
+              <div class="wechat-body" ref="chatBodyRef">
                 <div
                   v-for="(msg, index) in chatMessages"
                   :key="index"
@@ -1909,11 +2517,14 @@ watch([isAuthed, isAdmin], () => {
                 </thead>
                 <tbody>
                   <tr v-for="page in pages" :key="page.id">
-                    <td>{{ page.url }}</td>
+                    <td :title="page.url" class="url-cell">{{ truncateUrl(page.url) }}</td>
                     <td>{{ page.account || '无' }}</td>
                     <td>{{ page.password || '无' }}</td>
                     <td>{{ page.note || '无' }}</td>
-                    <td v-if="isAdmin"><button class="ghost danger" @click="deletePage(page.id)">删除</button></td>
+                    <td v-if="isAdmin">
+                      <button class="ghost" @click="openEditPage(page)">编辑</button>
+                      <button class="ghost danger" @click="deletePage(page.id)">删除</button>
+                    </td>
                   </tr>
                   <tr v-if="!pages.length">
                     <td colspan="5" class="muted">请选择分类查看或暂无记录</td>
@@ -1932,8 +2543,14 @@ watch([isAuthed, isAdmin], () => {
               <h3>高德地图 · 实时位置</h3>
             </div>
             <div class="header-actions">
+              <button class="outline" @click="requestBrowserLocation">
+                <span v-if="!isRequestingLocation">📍 请求定位权限</span>
+                <span v-else>⏳ 请求中...</span>
+              </button>
+              <button class="outline" @click="showManualLocationInput = !showManualLocationInput">
+                📝 手动输入位置
+              </button>
               <button class="outline" @click="refreshLocation">刷新定位</button>
-              <button @click="initMap" :disabled="mapLoaded">初始化地图</button>
             </div>
           </div>
 
@@ -1941,6 +2558,38 @@ watch([isAuthed, isAdmin], () => {
             <div v-if="locationError" class="alert error">
               <strong>定位错误：</strong>
               <span>{{ locationError }}</span>
+              <p class="muted small" style="margin-top: 8px;">
+                💡 提示：如果设备不支持定位，可以点击"手动输入位置"按钮输入地址或坐标
+              </p>
+            </div>
+
+            <!-- 手动输入位置表单 -->
+            <div v-if="showManualLocationInput" class="manual-location-form">
+              <h4>手动输入位置</h4>
+              <div class="form-row">
+                <input 
+                  v-model="manualAddress" 
+                  type="text" 
+                  placeholder="输入地址，例如：北京市朝阳区"
+                  @keyup.enter="searchAddress"
+                />
+                <button @click="searchAddress" :disabled="!manualAddress.trim()">搜索地址</button>
+              </div>
+              <div class="form-row">
+                <input 
+                  v-model="manualLng" 
+                  type="number" 
+                  step="0.000001"
+                  placeholder="经度，例如：116.397428"
+                />
+                <input 
+                  v-model="manualLat" 
+                  type="number" 
+                  step="0.000001"
+                  placeholder="纬度，例如：39.90923"
+                />
+                <button @click="setManualLocation" :disabled="!manualLng || !manualLat">设置坐标</button>
+              </div>
             </div>
 
             <div v-if="userLocation" class="location-info">
@@ -1962,11 +2611,70 @@ watch([isAuthed, isAdmin], () => {
               </div>
             </div>
 
-            <div id="amap-container" class="map-container"></div>
+            <!-- 地图和AI聊天并排布局 -->
+            <div class="map-chat-layout">
+              <div class="map-section">
+                <div id="amap-container" class="map-container"></div>
+                <div v-if="!mapLoaded" class="map-placeholder">
+                  <p class="muted">地图加载中...</p>
+                  <p class="muted small">首次使用需要授权浏览器定位权限</p>
+                </div>
+              </div>
 
-            <div v-if="!mapLoaded" class="map-placeholder">
-              <p class="muted">点击"初始化地图"按钮加载高德地图</p>
-              <p class="muted small">首次使用需要授权浏览器定位权限</p>
+              <!-- AI聊天框 -->
+              <div class="map-chat-section">
+                <div class="map-chat-header">
+                  <h4>🤖 AI助手</h4>
+                  <span class="muted small">基于当前位置为您推荐</span>
+                </div>
+
+                <!-- 快捷按钮 -->
+                <div class="map-chat-shortcuts">
+                  <button class="shortcut-btn" @click="askMapAI('附近美食')">
+                    🍜 附近美食
+                  </button>
+                  <button class="shortcut-btn" @click="askMapAI('附近旅游攻略')">
+                    🏞️ 旅游攻略
+                  </button>
+                  <button class="shortcut-btn" @click="askMapAI('附近酒店')">
+                    🏨 附近酒店
+                  </button>
+                  <button class="shortcut-btn" @click="askMapAI('附近景点')">
+                    📍 附近景点
+                  </button>
+                </div>
+
+                <!-- 聊天消息区域 -->
+                <div class="map-chat-messages">
+                  <div v-if="mapChatMessages.length === 0" class="chat-empty">
+                    <p class="muted">👋 你好！我是地图AI助手</p>
+                    <p class="muted small">点击上方按钮或输入问题，我会根据您的位置为您推荐</p>
+                  </div>
+                  <div v-for="(msg, idx) in mapChatMessages" :key="idx" 
+                       :class="['chat-bubble', msg.role]">
+                    <div class="bubble-content" v-html="formatMapChat(msg.content)"></div>
+                  </div>
+                  <div v-if="mapChatLoading" class="chat-bubble assistant">
+                    <div class="bubble-content typing">
+                      <span></span><span></span><span></span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 输入框 -->
+                <div class="map-chat-input">
+                  <input 
+                    v-model="mapChatInput" 
+                    type="text" 
+                    placeholder="问问AI，例如：附近有什么好吃的？"
+                    @keyup.enter="sendMapChat"
+                    :disabled="mapChatLoading"
+                  />
+                  <button @click="sendMapChat" :disabled="mapChatLoading || !mapChatInput.trim()">
+                    发送
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -2207,6 +2915,31 @@ watch([isAuthed, isAdmin], () => {
         </div>
       </div>
 
+      <div v-if="modals.pageEdit" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>编辑网页</h3>
+            <button class="icon" @click="modals.pageEdit = false">×</button>
+          </div>
+          <label>所属分类</label>
+          <select v-model="forms.editPage.category_id">
+            <option value="" disabled>请选择</option>
+            <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+          </select>
+          <label>网址</label>
+          <input v-model="forms.editPage.url" placeholder="https://..." />
+          <label>账号</label>
+          <input v-model="forms.editPage.account" placeholder="账号（可选）" />
+          <label>密码</label>
+          <input v-model="forms.editPage.password" placeholder="密码（可选）" />
+          <label>Cookie</label>
+          <input v-model="forms.editPage.cookie" placeholder="Cookie（可选）" />
+          <label>备注</label>
+          <input v-model="forms.editPage.note" placeholder="备注信息" />
+          <button @click="updatePage">更新</button>
+        </div>
+      </div>
+
       <div v-if="modals.role" class="modal-mask">
         <div class="modal">
           <div class="modal-header">
@@ -2326,15 +3059,197 @@ watch([isAuthed, isAdmin], () => {
 /* 地图相关样式 */
 .map-wrapper {
   position: relative;
-  min-height: 600px;
+  min-height: 450px;
+}
+
+.map-chat-layout {
+  display: flex;
+  gap: 16px;
+}
+
+.map-section {
+  flex: 0 0 70%;
+  position: relative;
 }
 
 .map-container {
   width: 100%;
-  height: 600px;
+  height: 450px !important;
+  min-height: 450px;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateZ(0);
+  will-change: transform;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* AI聊天框样式 */
+.map-chat-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  height: 450px;
+}
+
+.map-chat-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.map-chat-header h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+}
+
+.map-chat-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.shortcut-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2));
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.shortcut-btn:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(139, 92, 246, 0.4));
+  transform: translateY(-1px);
+}
+
+.map-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-empty {
+  text-align: center;
+  padding: 20px;
+}
+
+.chat-bubble {
+  max-width: 90%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+}
+
+.chat-bubble.assistant {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.bubble-content.typing {
+  display: flex;
+  gap: 4px;
+}
+
+.bubble-content.typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: typing 1s infinite;
+}
+
+.bubble-content.typing span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.bubble-content.typing span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.map-chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.map-chat-input input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font-size: 13px;
+}
+
+.map-chat-input button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+/* 白天模式适配 */
+.light-mode .map-chat-section {
+  background: #ffffff;
+  border-color: #e5e7eb;
+}
+
+.light-mode .map-chat-header {
+  background: #f8fafc;
+  border-color: #e5e7eb;
+}
+
+.light-mode .map-chat-shortcuts {
+  border-color: #e5e7eb;
+}
+
+.light-mode .shortcut-btn {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+  border-color: #d1d5db;
+  color: #1e293b;
+}
+
+.light-mode .chat-bubble.assistant {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.light-mode .map-chat-input {
+  background: #f8fafc;
+  border-color: #e5e7eb;
+}
+
+.light-mode .map-chat-input input {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #1e293b;
 }
 
 .map-placeholder {
@@ -2351,6 +3266,54 @@ watch([isAuthed, isAdmin], () => {
 
 .dark-mode .map-placeholder {
   background: rgba(30, 30, 30, 0.95);
+}
+
+.manual-location-form {
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.dark-mode .manual-location-form {
+  background: rgba(40, 40, 40, 0.9);
+}
+
+.manual-location-form h4 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.manual-location-form .form-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.manual-location-form .form-row:last-child {
+  margin-bottom: 0;
+}
+
+.manual-location-form input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+}
+
+.dark-mode .manual-location-form input {
+  background: rgba(30, 30, 30, 0.8);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.manual-location-form button {
+  padding: 10px 20px;
+  white-space: nowrap;
 }
 
 .location-info {

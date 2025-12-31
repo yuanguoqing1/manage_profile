@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, chat, models, role_prompts, users, web, ws
+from app.api.routes import admin, auth, chat, memory, models, role_prompts, users, web, ws
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -14,4 +14,5 @@ api_router.include_router(users.router)
 api_router.include_router(role_prompts.router)
 api_router.include_router(web.router)
 api_router.include_router(chat.router)
+api_router.include_router(memory.router)
 api_router.include_router(ws.router)

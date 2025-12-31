@@ -13,6 +13,11 @@ from sqlmodel import Session, select
 
 from app.models.user import ModelConfig, Role, RolePrompt, User
 from app.schemas.message import ChatCompletionRequest
+from app.services.memory_service import (
+    search_memories,
+    extract_and_save_memory,
+    is_memory_enabled,
+)
 
 
 def _select_model(session: Session, payload: ChatCompletionRequest) -> ModelConfig:
@@ -56,6 +61,23 @@ def build_chat_request(
             "content": f"当前用户昵称：{user.name}，角色：{user.role}。请在回答时体现礼貌、简洁并结合用户身份。",
         }
     ]
+
+    # 获取用户相关记忆
+    if is_memory_enabled() and payload.messages:
+        last_user_msg = None
+        for msg in reversed(payload.messages):
+            if msg.role == "user":
+                last_user_msg = msg.content
+                break
+        
+        if last_user_msg:
+            memories = search_memories(last_user_msg, str(user.id), limit=3)
+            if memories:
+                memory_context = "用户相关记忆：\n" + "\n".join(f"- {m}" for m in memories)
+                system_prompts.append({
+                    "role": "system",
+                    "content": memory_context,
+                })
 
     role_prompt_text = _role_prompt(session, payload)
     if role_prompt_text:

@@ -25,19 +25,32 @@ html.light-mode {
 
 html.light-mode body {
   background: #f6f7fb;
-  color: #0f172a;
+  color: #1e293b; /* 加深文字颜色 */
 }
 
 html.light-mode .sidebar {
   background: #ffffff;
   border-right: 1px solid #e5e7eb;
-  color: #0f172a;
+  color: #1e293b; /* 加深文字颜色 */
+}
+
+html.light-mode .brand-name {
+  color: #0f172a; /* 加深品牌名称 */
+}
+
+html.light-mode .brand-sub {
+  color: #64748b; /* 加深副标题 */
 }
 
 html.light-mode .menu button {
   background: #f4f4f5;
-  color: #0f172a;
+  color: #1e293b; /* 加深按钮文字 */
   border-color: #e5e7eb;
+}
+
+html.light-mode .menu button:hover {
+  background: #e5e7eb;
+  color: #0f172a;
 }
 
 html.light-mode .menu button.active {
@@ -53,25 +66,33 @@ html.light-mode .panel,
 html.light-mode .report-card,
 html.light-mode .panel.neon-panel {
   background: #ffffff;
-  color: #0f172a;
+  color: #1e293b; /* 加深面板文字 */
   border-color: #e5e7eb;
+}
+
+html.light-mode h1,
+html.light-mode h2,
+html.light-mode h3,
+html.light-mode h4 {
+  color: #0f172a; /* 加深标题 */
 }
 
 html.light-mode .muted,
 html.light-mode .eyebrow,
 html.light-mode .meta-chip {
-  color: #475569;
+  color: #64748b; /* 加深次要文字 */
 }
 
 html.light-mode .meta-chip {
   background: #e2e8f0;
   border-color: #cbd5e1;
+  color: #475569; /* 加深芯片文字 */
 }
 
 html.light-mode .report-card .pill {
   background: #f8fafc;
   border-color: #e2e8f0;
-  color: #0f172a;
+  color: #1e293b; /* 加深pill文字 */
 }
 
 html.light-mode .report-card .pill.success {
@@ -82,12 +103,39 @@ html.light-mode .report-card .pill.success {
 
 html.light-mode .wechat-bubble.assistant {
   background: #e2e8f0;
-  color: #0f172a;
+  color: #1e293b; /* 加深气泡文字 */
 }
 
 html.light-mode .wechat-bubble.user {
   background: #3b82f6;
   color: #fff;
+}
+
+html.light-mode .sidebar-footer {
+  background: #f1f5f9;
+  color: #64748b; /* 加深页脚文字 */
+  border-color: #e2e8f0;
+}
+
+html.light-mode input,
+html.light-mode textarea,
+html.light-mode select {
+  background: #ffffff;
+  color: #1e293b; /* 加深输入框文字 */
+  border-color: #d1d5db;
+}
+
+html.light-mode button {
+  color: #1e293b; /* 加深按钮文字 */
+}
+
+html.light-mode .table th,
+html.light-mode .table td {
+  color: #1e293b; /* 加深表格文字 */
+}
+
+html.light-mode label {
+  color: #374151; /* 加深标签文字 */
 }
 
 .app-shell {
@@ -1711,4 +1759,185 @@ html.light-mode .board-item,
 html.light-mode .info-row {
   background: #f8fafc;
   border-color: #e2e8f0;
+}
+
+/* 白天模式提示信息样式 - 黑色加粗 */
+html.light-mode .alert {
+  color: #0f172a;
+  font-weight: 600;
+  border-color: #d1d5db;
+  background: #f8fafc;
+}
+
+html.light-mode .alert.success {
+  color: #0f172a;
+  font-weight: 600;
+  border-color: #16a34a;
+  background: rgba(22, 163, 74, 0.1);
+}
+
+html.light-mode .alert.error {
+  color: #0f172a;
+  font-weight: 600;
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+}
+
+html.light-mode .alert.warning {
+  color: #0f172a;
+  font-weight: 600;
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+html.light-mode .alert.info {
+  color: #0f172a;
+  font-weight: 600;
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+html.light-mode .loading-banner {
+  color: #0f172a;
+  font-weight: 600;
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+html.light-mode .status-bar {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+html.light-mode .muted {
+  color: #374151;
+  font-weight: 500;
+}
+
+html.light-mode .small {
+  color: #374151;
+}
+
+
+/* --------- 性能优化 --------- */
+/* 减少重绘和重排 */
+* {
+  will-change: auto;
+}
+
+/* 优化动画性能 */
+.menu button,
+.peer-item,
+.wechat-bubble,
+button {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* 减少过渡时间 */
+.menu button {
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+button {
+  transition: transform 0.08s ease, box-shadow 0.15s ease;
+}
+
+.peer-item {
+  transition: background 0.15s, border-color 0.15s;
+}
+
+/* 优化滚动性能 */
+.wechat-body,
+.peer-items,
+.map-chat-messages {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  contain: content;
+}
+
+/* 减少backdrop-filter使用（性能消耗大） */
+.panel {
+  backdrop-filter: none;
+}
+
+.modal-mask {
+  backdrop-filter: blur(3px);
+}
+
+/* 优化表格渲染 */
+.table {
+  table-layout: fixed;
+}
+
+/* 减少box-shadow复杂度 */
+.report-card,
+.panel,
+.wechat-window {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 优化字体渲染 */
+body {
+  text-rendering: optimizeSpeed;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 减少动画 - 用户偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 优化图层合成 */
+.sidebar,
+.content,
+.modal {
+  contain: layout style;
+}
+
+/* 减少重绘区域 */
+.alert {
+  contain: layout;
+}
+
+/* 优化输入框 */
+input,
+textarea,
+select {
+  font-size: 16px; /* 防止iOS缩放 */
+}
+
+/* 浅色模式提示信息优化 */
+html.light-mode .alert {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+html.light-mode .alert.success {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: #16a34a;
+  color: #166534;
+}
+
+html.light-mode .alert.error {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: #ef4444;
+  color: #b91c1c;
+}
+
+
+/* URL截断样式 */
+.url-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
 }
