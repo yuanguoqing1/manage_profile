@@ -1,13 +1,75 @@
+# Python
 __pycache__/
-*.pyc
-*.db
-.env/
-venv/
-.venv/
-node_modules/
-.DS_Store
-.vscode/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
 dist/
 build/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+backend/.venv/
+backend/venv/
+frontend/node_modules/
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# IDE
+.vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 日志
 *.log
+app.log
+backend/app.log
+
+# 构建产物
+dist/
+build/
+*.dist-info/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# 前端构建
+frontend/dist/
+frontend/build/
+
+# 备份文件
+*.bak
+*.bak.*
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 其他
+*.rpm
+*.exe
