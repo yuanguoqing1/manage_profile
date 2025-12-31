@@ -81,14 +81,39 @@ def logout_user_online(token: str) -> None:
 
 
 def get_online_count(session: Session) -> int:
-    if redis_client:
-        return int(redis_client.scard("online_tokens"))
+    # 先清理过期token
     purge_expired_tokens(session)
-    return session.exec(select(func.count()).select_from(AuthToken)).one()[0]
+    
+    # 从数据库获取有效token数量
+    db_count = session.exec(select(func.count()).select_from(AuthToken)).one()
+    
+    if redis_client:
+        # 获取Redis中的在线token集合
+        redis_tokens = redis_client.smembers("online_tokens")
+        
+        # 验证Redis中的token是否在数据库中存在
+        valid_tokens = set()
+        for token in redis_tokens:
+            if session.get(AuthToken, token):
+                valid_tokens.add(token)
+        
+        # 同步Redis，移除无效token
+        if len(valid_tokens) != len(redis_tokens):
+            redis_client.delete("online_tokens")
+            if valid_tokens:
+                redis_client.sadd("online_tokens", *valid_tokens)
+        
+        return len(valid_tokens)
+    
+    return db_count
 
 
 def get_register_count(session: Session) -> int:
+    # 始终从数据库获取真实的用户总数
+    count = session.exec(select(func.count()).select_from(User)).one()
+    
+    # 如果Redis可用，同步更新Redis中的值
     if redis_client:
-        value = redis_client.get("register_count")
-        return int(value) if value else 0
-    return session.exec(select(func.count()).select_from(User)).one()[0]
+        redis_client.set("register_count", count)
+    
+    return count

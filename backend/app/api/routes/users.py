@@ -9,14 +9,15 @@ from sqlmodel import Session, select
 
 from app.api.deps import get_current_user, require_admin
 from app.core.logging import read_logs
+from app.core.security import generate_salt, hash_password
 from app.crud.message import create_peer_message, get_peer_messages
 from app.crud.token import get_online_count, get_register_count, purge_expired_tokens
-from app.crud.user import list_contacts
+from app.crud.user import get_user_by_name, list_contacts
 from app.db.session import get_session
 from app.models.token import AuthToken
 from app.models.user import ModelConfig, User
 from app.schemas.message import PeerMessageCreate, PeerMessagePublic
-from app.schemas.user import UserContactStatusPublic
+from app.schemas.user import UserContactStatusPublic, UserPublic, UserUpdate
 from app.services.ws_manager import ws_manager
 
 router = APIRouter(tags=["users"])
@@ -131,3 +132,56 @@ def dashboard(request: Request, session: Session = Depends(get_session), user: U
 @router.get("/logs")
 def get_logs(limit: int = 200, _: User = Depends(require_admin)):
     return {"lines": read_logs(max_lines=max(10, min(limit, 1000)))}
+
+
+@router.put("/users/{user_id}", response_model=UserPublic)
+def update_user_profile(
+    user_id: int,
+    payload: UserUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """更新用户信息（用户只能修改自己的信息，管理员可以修改任何人）。"""
+    # 检查权限：只能修改自己的信息，除非是管理员
+    if current_user.id != user_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权修改其他用户信息")
+    
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    
+    # 普通用户不能修改自己的角色
+    if "role" in update_data and current_user.role != "admin":
+        del update_data["role"]
+    
+    # 如果修改用户名，检查是否重复
+    if "name" in update_data and update_data["name"] != user.name:
+        existing = get_user_by_name(session, update_data["name"])
+        if existing:
+            raise HTTPException(status_code=400, detail="用户名已存在")
+    
+    # 如果更新密码，需要重新哈希
+    if "password" in update_data and update_data["password"]:
+        salt = generate_salt()
+        update_data["password_hash"] = hash_password(update_data["password"], salt)
+        update_data["salt"] = salt
+        del update_data["password"]
+
+    for key, value in update_data.items():
+        setattr(user, key, value)
+    
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    return UserPublic(
+        id=user.id,
+        name=user.name,
+        balance=user.balance,
+        role=user.role,
+        email=user.email,
+        phone=user.phone,
+    )
+

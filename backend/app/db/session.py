@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 
 
 def _mysql_url() -> str:
-    # 你也可以直接写死，但建议用环境变量，部署更舒服
+
     user = os.getenv("MYSQL_USER", "manage_profile")
     password = os.getenv("MYSQL_PASSWORD", "123456")
     host = os.getenv("MYSQL_HOST", "127.0.0.1")

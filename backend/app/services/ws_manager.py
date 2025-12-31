@@ -42,5 +42,16 @@ class ConnectionManager:
     def is_ws_online(self, user_id: int) -> bool:
         return user_id in self._connections and len(self._connections[user_id]) > 0
 
+    async def disconnect_all(self) -> None:
+        """关闭所有WebSocket连接（用于服务器关闭时）。"""
+        for user_id, conns in list(self._connections.items()):
+            for ws in list(conns):
+                try:
+                    await ws.close(code=1001, reason="Server shutdown")
+                except Exception:  # noqa: BLE001
+                    pass
+        self._connections.clear()
+        logging.info("All WebSocket connections closed")
+
 
 ws_manager = ConnectionManager()

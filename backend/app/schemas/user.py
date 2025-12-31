@@ -13,6 +13,8 @@ class UserCreate(SQLModel):
     name: str
     password: str
     role: Optional[Role] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class UserPublic(SQLModel):
@@ -20,6 +22,8 @@ class UserPublic(SQLModel):
     name: str
     balance: float
     role: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class UserContactPublic(SQLModel):
@@ -40,6 +44,8 @@ class UserUpdate(SQLModel):
     name: Optional[str] = None
     password: Optional[str] = None
     role: Optional[Role] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class RoleUpdate(SQLModel):

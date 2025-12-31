@@ -42,7 +42,14 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)):
     user = create_user(session, payload, chosen_role, password_hash, salt)
 
     increment_register_count()
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
+    return UserPublic(
+        id=user.id,
+        name=user.name,
+        balance=user.balance,
+        role=user.role,
+        email=user.email,
+        phone=user.phone,
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -61,7 +68,14 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)):
 
     register_user_online(token)
 
-    public_user = UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
+    public_user = UserPublic(
+        id=user.id,
+        name=user.name,
+        balance=user.balance,
+        role=user.role,
+        email=user.email,
+        phone=user.phone,
+    )
     return LoginResponse(token=token, user=public_user)
 
 
@@ -79,4 +93,11 @@ def logout(
 
 @router.get("/me", response_model=UserPublic)
 def get_me(user: User = Depends(get_current_user)):
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
+    return UserPublic(
+        id=user.id,
+        name=user.name,
+        balance=user.balance,
+        role=user.role,
+        email=user.email,
+        phone=user.phone,
+    )

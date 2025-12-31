@@ -46,6 +46,13 @@ const peerSending = ref(false)
 const peerMessagesLoading = ref(false)
 const contactSearch = ref('')
 
+// 地图相关状态
+const mapLoaded = ref(false)
+const mapInstance = ref(null)
+const userLocation = ref(null)
+const locationError = ref('')
+const mapMarker = ref(null)
+
 const defaultRolePrompt =
   '你是一位可靠的智能助手，请保持简洁、专业并主动提供有用的下一步建议。'
 
@@ -66,6 +73,7 @@ const modals = ref({
   rolePromptEdit: false,
   userEdit: false,
   modelEdit: false,
+  profileEdit: false,
 })
 
 const forms = ref({
@@ -98,17 +106,11 @@ const forms = ref({
   role: { user_id: '', role: 'user' },
   rolePrompt: { name: '', prompt: '' },
   editRolePrompt: { id: null, name: '', prompt: '' },
+  profileEdit: { name: '', password: '', email: '', phone: '' },
 })
 
 const reportTrend = ref([52, 66, 48, 72, 95, 88, 76, 110, 90, 130])
 const registerTrend = ref([8, 16, 20, 12, 18, 26, 24])
-const trafficSources = ref([
-  { country: '中国', city: '北京', users: 320, x: 68, y: 38 },
-  { country: '美国', city: '旧金山', users: 190, x: 24, y: 44 },
-  { country: '德国', city: '柏林', users: 120, x: 50, y: 36 },
-  { country: '新加坡', city: '新加坡', users: 150, x: 71, y: 63 },
-  { country: '澳大利亚', city: '悉尼', users: 90, x: 80, y: 78 },
-])
 
 const isAuthed = computed(() => Boolean(token.value))
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
@@ -765,6 +767,160 @@ async function deleteUser(userId) {
   }
 }
 
+async function updateProfile() {
+  try {
+    const payload = { name: forms.value.profileEdit.name }
+    if (forms.value.profileEdit.password) {
+      payload.password = forms.value.profileEdit.password
+    }
+    if (forms.value.profileEdit.email) {
+      payload.email = forms.value.profileEdit.email
+    }
+    if (forms.value.profileEdit.phone) {
+      payload.phone = forms.value.profileEdit.phone
+    }
+    const res = await request(`/users/${currentUser.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+    currentUser.value = { ...currentUser.value, name: res.name, email: res.email, phone: res.phone }
+    localStorage.setItem('user', JSON.stringify(currentUser.value))
+    setStatus('success', '个人信息已更新')
+    modals.value.profileEdit = false
+    forms.value.profileEdit = { name: '', password: '', email: '', phone: '' }
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function openProfileEdit() {
+  forms.value.profileEdit = {
+    name: currentUser.value?.name || '',
+    password: '',
+    email: currentUser.value?.email || '',
+    phone: currentUser.value?.phone || '',
+  }
+  modals.value.profileEdit = true
+}
+
+// ---------------------------
+// 地图功能
+// ---------------------------
+function loadAmapScript() {
+  return new Promise((resolve, reject) => {
+    if (window.AMap) {
+      resolve(window.AMap)
+      return
+    }
+    const script = document.createElement('script')
+    // 从环境变量读取高德地图 API Key
+    const amapKey = import.meta.env.VITE_AMAP_KEY || 'YOUR_AMAP_KEY'
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${amapKey}`
+    script.async = true
+    script.onload = () => resolve(window.AMap)
+    script.onerror = () => reject(new Error('高德地图加载失败，请检查API Key是否正确'))
+    document.head.appendChild(script)
+  })
+}
+
+async function initMap() {
+  if (mapLoaded.value) return
+  
+  try {
+    const AMap = await loadAmapScript()
+    
+    // 创建地图实例
+    mapInstance.value = new AMap.Map('amap-container', {
+      zoom: 15,
+      center: [116.397428, 39.90923], // 默认北京
+      viewMode: '3D',
+      pitch: 50,
+    })
+    
+    mapLoaded.value = true
+    
+    // 获取用户位置
+    getUserLocation()
+  } catch (error) {
+    locationError.value = error.message
+    setStatus('error', '地图加载失败：' + error.message)
+  }
+}
+
+function getUserLocation() {
+  if (!mapInstance.value) return
+  
+  const AMap = window.AMap
+  if (!AMap) return
+  
+  // 使用高德地图定位插件
+  AMap.plugin('AMap.Geolocation', () => {
+    const geolocation = new AMap.Geolocation({
+      enableHighAccuracy: true,
+      timeout: 10000,
+      zoomToAccuracy: true,
+    })
+    
+    geolocation.getCurrentPosition((status, result) => {
+      if (status === 'complete') {
+        const { lng, lat } = result.position
+        userLocation.value = {
+          lng,
+          lat,
+          address: result.formattedAddress || '未知地址',
+          city: result.addressComponent?.city || '未知城市',
+        }
+        
+        // 设置地图中心
+        mapInstance.value.setCenter([lng, lat])
+        
+        // 添加标记
+        if (mapMarker.value) {
+          mapMarker.value.setMap(null)
+        }
+        
+        mapMarker.value = new AMap.Marker({
+          position: [lng, lat],
+          title: '我的位置',
+          icon: new AMap.Icon({
+            size: new AMap.Size(40, 50),
+            image: '//a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-default.png',
+            imageSize: new AMap.Size(40, 50),
+          }),
+        })
+        
+        mapInstance.value.add(mapMarker.value)
+        
+        // 添加信息窗体
+        const infoWindow = new AMap.InfoWindow({
+          content: `<div style="padding: 10px;">
+            <h4 style="margin: 0 0 8px 0;">我的位置</h4>
+            <p style="margin: 4px 0;">经度：${lng.toFixed(6)}</p>
+            <p style="margin: 4px 0;">纬度：${lat.toFixed(6)}</p>
+            <p style="margin: 4px 0;">地址：${userLocation.value.address}</p>
+          </div>`,
+          offset: new AMap.Pixel(0, -30),
+        })
+        
+        infoWindow.open(mapInstance.value, [lng, lat])
+        
+        setStatus('success', '定位成功')
+      } else {
+        locationError.value = '定位失败：' + result.message
+        setStatus('error', '定位失败，请检查浏览器定位权限')
+      }
+    })
+  })
+}
+
+function refreshLocation() {
+  if (!mapInstance.value) {
+    initMap()
+    return
+  }
+  getUserLocation()
+}
+
 // ---------------------------
 // Chat stream (原逻辑保留)
 // ---------------------------
@@ -1166,6 +1322,9 @@ watch([isAuthed, isAdmin], () => {
         <button :class="{ active: activeMenu === 'web' }" @click="navigateTo('web')" :disabled="!isAuthed">
           网页收藏
         </button>
+        <button :class="{ active: activeMenu === 'map' }" @click="navigateTo('map')" :disabled="!isAuthed">
+          地图定位
+        </button>
         <button :class="{ active: activeMenu === 'users' }" @click="navigateTo('users')" :disabled="!isAdmin">
           用户与角色
         </button>
@@ -1197,7 +1356,7 @@ watch([isAuthed, isAdmin], () => {
             <button class="outline" @click="modals.register = true">注册</button>
           </template>
           <template v-else>
-            <div class="avatar">
+            <div class="avatar" @click="modals.profileEdit = true" style="cursor: pointer;" title="点击修改个人信息">
               {{ currentUser?.name }} / {{ currentUser?.role }}
               <span class="ws-pill" :class="{ ok: wsConnected, bad: !wsConnected }" title="站内互聊实时连接状态">
                 {{ wsConnected ? '实时' : (wsConnecting ? '连接中' : '离线') }}
@@ -1225,7 +1384,7 @@ watch([isAuthed, isAdmin], () => {
           <div class="panel-header">
             <div>
               <p class="eyebrow">站内互聊</p>
-              <h3>仿微信气泡 · 在线联系人</h3>
+              <h3>在线联系人</h3>
             </div>
             <div class="header-actions">
               <div class="meta-chip">
@@ -1375,7 +1534,7 @@ watch([isAuthed, isAdmin], () => {
         <section class="panel neon-panel wechat-panel" v-if="activeMenu === 'chat'">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">微信风格对话</p>
+              <p class="eyebrow">对话</p>
               <h3>对话面板 · 沉浸式气泡</h3>
             </div>
             <div class="header-actions wechat-toolbar">
@@ -1450,7 +1609,7 @@ watch([isAuthed, isAdmin], () => {
                   v-model="chatInput"
                   rows="5"
                   class="wechat-input"
-                  placeholder="仿微信气泡体验：输入问题或需求，Enter 发送，Shift+Enter 换行"
+                  placeholder="输入问题或需求，Enter 发送，Shift+Enter 换行"
                   @keyup.enter.exact.prevent="sendChat"
                 ></textarea>
                 <div class="composer-actions">
@@ -1601,36 +1760,7 @@ watch([isAuthed, isAdmin], () => {
           </div>
 
           <div class="report-row map-row">
-            <div class="report-card map-card">
-              <div class="card-head">
-                <div>
-                  <p class="eyebrow">人数来源</p>
-                  <h3>全球点亮分布</h3>
-                </div>
-                <span class="meta-chip">活跃地区 {{ trafficSources.length }}</span>
-              </div>
-              <div class="map-board">
-                <div class="map-silhouette"></div>
-                <div class="map-dots">
-                  <span
-                    v-for="item in trafficSources"
-                    :key="item.country"
-                    class="map-dot"
-                    :style="{ left: `${item.x}%`, top: `${item.y}%` }"
-                    :title="`${item.country} · ${item.city}`"
-                  ></span>
-                </div>
-              </div>
-              <ul class="source-list">
-                <li v-for="item in trafficSources" :key="item.country">
-                  <span class="strong">{{ item.country }}</span>
-                  <span class="muted">{{ item.city }}</span>
-                  <span class="pill success">{{ item.users }} 人</span>
-                </li>
-              </ul>
-            </div>
-
-            <div class="report-card board-card">
+            <div class="report-card board-card" style="flex: 1;">
               <div class="card-head">
                 <div>
                   <p class="eyebrow">运维快照</p>
@@ -1790,6 +1920,53 @@ watch([isAuthed, isAdmin], () => {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 地图定位 -->
+        <section class="panel neon-panel" v-if="activeMenu === 'map'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">地图定位</p>
+              <h3>高德地图 · 实时位置</h3>
+            </div>
+            <div class="header-actions">
+              <button class="outline" @click="refreshLocation">刷新定位</button>
+              <button @click="initMap" :disabled="mapLoaded">初始化地图</button>
+            </div>
+          </div>
+
+          <div class="map-wrapper">
+            <div v-if="locationError" class="alert error">
+              <strong>定位错误：</strong>
+              <span>{{ locationError }}</span>
+            </div>
+
+            <div v-if="userLocation" class="location-info">
+              <div class="info-card">
+                <span class="label">经度</span>
+                <strong>{{ userLocation.lng.toFixed(6) }}</strong>
+              </div>
+              <div class="info-card">
+                <span class="label">纬度</span>
+                <strong>{{ userLocation.lat.toFixed(6) }}</strong>
+              </div>
+              <div class="info-card">
+                <span class="label">城市</span>
+                <strong>{{ userLocation.city }}</strong>
+              </div>
+              <div class="info-card full-width">
+                <span class="label">详细地址</span>
+                <strong>{{ userLocation.address }}</strong>
+              </div>
+            </div>
+
+            <div id="amap-container" class="map-container"></div>
+
+            <div v-if="!mapLoaded" class="map-placeholder">
+              <p class="muted">点击"初始化地图"按钮加载高德地图</p>
+              <p class="muted small">首次使用需要授权浏览器定位权限</p>
             </div>
           </div>
         </section>
@@ -2075,6 +2252,24 @@ watch([isAuthed, isAdmin], () => {
           <button @click="updateRolePrompt">更新</button>
         </div>
       </div>
+
+      <div v-if="modals.profileEdit" class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>修改个人信息</h3>
+            <button class="icon" @click="modals.profileEdit = false">×</button>
+          </div>
+          <label>用户名</label>
+          <input v-model="forms.profileEdit.name" placeholder="请输入用户名" />
+          <label>新密码（可选）</label>
+          <input v-model="forms.profileEdit.password" type="password" placeholder="不修改可留空" />
+          <label>邮箱（可选）</label>
+          <input v-model="forms.profileEdit.email" type="email" placeholder="请输入邮箱" />
+          <label>手机号（可选）</label>
+          <input v-model="forms.profileEdit.phone" placeholder="请输入手机号" />
+          <button @click="updateProfile">保存</button>
+        </div>
+      </div>
     </main>
   </div>
 </template>
@@ -2126,5 +2321,72 @@ watch([isAuthed, isAdmin], () => {
 
 .ws-pill.bad {
   background: rgba(255, 59, 48, 0.18);
+}
+
+/* 地图相关样式 */
+.map-wrapper {
+  position: relative;
+  min-height: 600px;
+}
+
+.map-container {
+  width: 100%;
+  height: 600px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.map-placeholder {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  padding: 40px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.dark-mode .map-placeholder {
+  background: rgba(30, 30, 30, 0.95);
+}
+
+.location-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.info-card {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dark-mode .info-card {
+  background: rgba(40, 40, 40, 0.8);
+}
+
+.info-card.full-width {
+  grid-column: 1 / -1;
+}
+
+.info-card .label {
+  font-size: 12px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-card strong {
+  font-size: 16px;
+  font-weight: 600;
 }
 </style>

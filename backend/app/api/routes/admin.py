@@ -23,7 +23,14 @@ def list_users(
     """获取所有用户列表（仅管理员）。"""
     users = session.exec(select(User)).all()
     return [
-        UserPublic(id=u.id, name=u.name, balance=u.balance, role=u.role)
+        UserPublic(
+            id=u.id,
+            name=u.name,
+            balance=u.balance,
+            role=u.role,
+            email=u.email,
+            phone=u.phone,
+        )
         for u in users
     ]
 
@@ -47,7 +54,14 @@ def create_user_admin(
     password_hash = hash_password(payload.password, salt)
     user = create_user(session, payload, chosen_role, password_hash, salt)
 
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
+    return UserPublic(
+        id=user.id,
+        name=user.name,
+        balance=user.balance,
+        role=user.role,
+        email=user.email,
+        phone=user.phone,
+    )
 
 
 @router.put("/users/{user_id}", response_model=UserPublic)
@@ -78,7 +92,14 @@ def update_user_admin(
     session.commit()
     session.refresh(user)
     
-    return UserPublic(id=user.id, name=user.name, balance=user.balance, role=user.role)
+    return UserPublic(
+        id=user.id,
+        name=user.name,
+        balance=user.balance,
+        role=user.role,
+        email=user.email,
+        phone=user.phone,
+    )
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

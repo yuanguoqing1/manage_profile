@@ -20,6 +20,8 @@ class User(SQLModel, table=True):
     password_hash: str
     salt: str
     role: str = Field(default=Role.user.value, index=True)
+    email: Optional[str] = Field(default=None, index=True)
+    phone: Optional[str] = Field(default=None)
 
 
 class ModelConfig(SQLModel, table=True):

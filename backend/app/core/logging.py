@@ -27,12 +27,12 @@ def setup_logging() -> None:
             "disable_existing_loggers": False,
             "formatters": {"default": formatter},
             "handlers": handlers,
-            "root": {"level": "DEBUG", "handlers": ["console", "file"]},
+            "root": {"level": "INFO", "handlers": ["console", "file"]},
             "loggers": {
-                "uvicorn": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
-                "uvicorn.error": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
-                "uvicorn.access": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
-                "fastapi": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
+                "uvicorn": {"level": "ERROR", "handlers": ["console", "file"], "propagate": False},
+                "uvicorn.error": {"level": "ERROR", "handlers": ["console", "file"], "propagate": False},
+                "uvicorn.access": {"level": "ERROR", "handlers": ["console", "file"], "propagate": False},
+                "fastapi": {"level": "INFO", "handlers": ["console", "file"], "propagate": False},
             },
         }
     )

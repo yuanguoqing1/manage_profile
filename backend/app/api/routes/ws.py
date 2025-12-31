@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from sqlmodel import Session
 
@@ -36,12 +38,25 @@ async def ws_endpoint(ws: WebSocket):
         await ws_manager.connect(user.id, ws)
         try:
             while True:
-                await ws.receive_text()
+                # 添加超时，避免无限阻塞
+                try:
+                    data = await asyncio.wait_for(ws.receive_text(), timeout=30.0)
+                    # 处理心跳
+                    if data in ("ping", "pong"):
+                        await ws.send_text("pong")
+                except asyncio.TimeoutError:
+                    # 超时后发送心跳检测
+                    try:
+                        await ws.send_text("ping")
+                    except Exception:  # noqa: BLE001
+                        break
         except WebSocketDisconnect:
-            ws_manager.disconnect(user.id, ws)
+            pass
         except Exception:  # noqa: BLE001
+            pass
+        finally:
             ws_manager.disconnect(user.id, ws)
             try:
-                await ws.close(code=1011)
+                await ws.close()
             except Exception:  # noqa: BLE001
                 pass
