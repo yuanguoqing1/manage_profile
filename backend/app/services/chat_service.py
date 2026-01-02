@@ -114,6 +114,9 @@ def stream_chat_completion(model: ModelConfig, target_url: str, request_body: di
                             error_text = error_body.get("error", {}).get("message", error_text)
                         except ValueError:
                             pass
+                        # 友好的错误提示
+                        if "Moderation" in error_text or "moderation" in error_text.lower():
+                            error_text = "内容被安全审核拦截，请修改消息内容后重试"
                         raise HTTPException(
                             status_code=upstream_response.status_code,
                             detail=f"上游错误：{error_text}",

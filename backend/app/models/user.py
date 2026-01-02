@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from typing import Optional
 
@@ -22,7 +23,8 @@ class User(SQLModel, table=True):
     role: str = Field(default=Role.user.value, index=True)
     email: Optional[str] = Field(default=None, index=True)
     phone: Optional[str] = Field(default=None)
-
+    LDC : Optional[int] = Field(default=0)
+    last_check_in: Optional[date] = Field(default=None)
 
 class ModelConfig(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

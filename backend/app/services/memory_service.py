@@ -30,13 +30,13 @@ def init_memory():
             _memory_enabled = False
             return
         
-        # 使用字典配置
+        # 使用字典配置 - 修正参数名
         config = {
             'llm': {
                 'provider': 'openai',
                 'config': {
                     'api_key': api_key,
-                    'base_url': base_url,
+                    'openai_base_url': base_url,  # 修正参数名
                     'model': model,
                     'temperature': 0.7
                 }
@@ -45,7 +45,7 @@ def init_memory():
                 'provider': 'openai',
                 'config': {
                     'api_key': api_key,
-                    'base_url': base_url,
+                    'openai_base_url': base_url,  # 修正参数名
                     'model': model
                 }
             },
@@ -121,7 +121,8 @@ def search_memories(query: str, user_id: str, limit: int = 5) -> list[str]:
                 memories.append(memory_text)
         return memories
     except Exception as e:
-        logger.error(f"搜索记忆失败: {e}")
+        # embeddings API不可用时静默失败
+        logger.debug(f"搜索记忆失败（可能是embeddings不支持）: {e}")
         return []
 
 

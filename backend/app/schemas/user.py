@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from sqlmodel import SQLModel
@@ -24,6 +25,8 @@ class UserPublic(SQLModel):
     role: str
     email: Optional[str] = None
     phone: Optional[str] = None
+    LDC: Optional[int] = 0
+    last_check_in: Optional[date] = None
 
 
 class UserContactPublic(SQLModel):

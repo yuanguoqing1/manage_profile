@@ -9,13 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.4.27",
-    "marked": "^11.1.1",
     "dompurify": "^3.0.8",
-    "pinia": "^2.1.7"
+    "marked": "^11.1.1",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.27"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.5.2",
+    "terser": "^5.44.1",
     "vite": "^4.4.9"
   }
 }

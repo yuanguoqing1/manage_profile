@@ -30,6 +30,8 @@ def list_users(
             role=u.role,
             email=u.email,
             phone=u.phone,
+            LDC=u.LDC or 0,
+            last_check_in=u.last_check_in,
         )
         for u in users
     ]
@@ -61,6 +63,8 @@ def create_user_admin(
         role=user.role,
         email=user.email,
         phone=user.phone,
+        LDC=user.LDC or 0,
+        last_check_in=user.last_check_in,
     )
 
 
@@ -99,6 +103,8 @@ def update_user_admin(
         role=user.role,
         email=user.email,
         phone=user.phone,
+        LDC=user.LDC or 0,
+        last_check_in=user.last_check_in,
     )
 
 

@@ -54,7 +54,7 @@ html.light-mode .menu button:hover {
 }
 
 html.light-mode .menu button.active {
-  background: linear-gradient(135deg, #3b82f6, #10b981);
+  background: linear-gradient(135deg, #60a5fa, #34d399);
   color: #fff;
 }
 
@@ -107,7 +107,7 @@ html.light-mode .wechat-bubble.assistant {
 }
 
 html.light-mode .wechat-bubble.user {
-  background: #3b82f6;
+  background: #60a5fa;
   color: #fff;
 }
 
@@ -136,6 +136,30 @@ html.light-mode .table td {
 
 html.light-mode label {
   color: #374151; /* 加深标签文字 */
+}
+
+html.light-mode .modal {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #000000;
+}
+
+html.light-mode .modal h3,
+html.light-mode .modal h4,
+html.light-mode .modal label {
+  color: #000000;
+}
+
+html.light-mode .modal input,
+html.light-mode .modal textarea,
+html.light-mode .modal select {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #000000;
+}
+
+html.light-mode .modal-mask {
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .app-shell {
@@ -485,6 +509,13 @@ button.danger {
 .table-wrapper.two-column {
   display: grid;
   grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  border: none;
+}
+
+.table-wrapper.web-bookmarks-layout {
+  display: grid;
+  grid-template-columns: 1fr 3fr;
   gap: 12px;
   border: none;
 }
@@ -1590,7 +1621,7 @@ html.light-mode .brand {
 }
 
 html.light-mode .logo {
-  background: #1d4ed8;
+  background: #60a5fa;
   color: #ffffff;
 }
 
@@ -1601,9 +1632,9 @@ html.light-mode .menu button {
 }
 
 html.light-mode .menu button.active {
-  background: #1d4ed8;
+  background: #60a5fa;
   color: #ffffff;
-  border-color: #1d4ed8;
+  border-color: #60a5fa;
   box-shadow: none;
 }
 
@@ -1612,7 +1643,7 @@ html.light-mode .content {
 }
 
 html.light-mode button {
-  background: #1d4ed8;
+  background: #60a5fa;
   color: #ffffff;
   box-shadow: none;
 }
@@ -1720,8 +1751,8 @@ html.light-mode .wechat-bubble.assistant {
 }
 
 html.light-mode .wechat-bubble.user {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+  background: #60a5fa;
+  border-color: #60a5fa;
   color: #ffffff;
 }
 
@@ -1741,7 +1772,7 @@ html.light-mode .peer-avatar,
 html.light-mode .wechat-avatar,
 html.light-mode .wechat-avatar.assistant,
 html.light-mode .wechat-avatar.user {
-  background: #1d4ed8;
+  background: #60a5fa;
   color: #ffffff;
 }
 
@@ -1940,4 +1971,813 @@ html.light-mode .alert.error {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+}
+
+
+/* 菜单组样式 */
+.menu-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-parent {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+}
+
+.menu-parent .arrow {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.menu-parent.expanded {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 16px;
+  margin-top: 6px;
+}
+
+.submenu button {
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+/* 浅色模式菜单组 */
+html.light-mode .menu-parent {
+  background: #e5e7eb;
+}
+
+html.light-mode .menu-parent.expanded {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+/* 深色模式菜单组 */
+html.dark-mode .menu-parent {
+  background: #1f1f1f;
+}
+
+html.dark-mode .menu-parent.expanded {
+  background: #2a2a2a;
+  border-color: #3f3f46;
+}
+
+
+/* 日记样式 */
+.diary-container {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  min-height: 500px;
+}
+
+.diary-list {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  max-height: 600px;
+}
+
+.diary-item {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.diary-item:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.diary-item.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.diary-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.diary-mood {
+  font-size: 20px;
+}
+
+.diary-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diary-item-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #9fb2d8;
+}
+
+.diary-editor {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.diary-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.diary-form-header {
+  display: flex;
+  gap: 12px;
+}
+
+.diary-title-input {
+  flex: 1;
+  font-size: 18px;
+  font-weight: 600;
+  padding: 12px;
+}
+
+.diary-mood-select {
+  width: 120px;
+  font-size: 16px;
+}
+
+.diary-content-input {
+  flex: 1;
+  min-height: 350px;
+  resize: none;
+  font-size: 15px;
+  line-height: 1.8;
+  padding: 14px;
+}
+
+.diary-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 浅色模式日记 */
+html.light-mode .diary-list,
+html.light-mode .diary-editor {
+  background: #ffffff;
+  border-color: #e5e7eb;
+}
+
+html.light-mode .diary-item {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+html.light-mode .diary-item:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+html.light-mode .diary-item.active {
+  background: #dbeafe;
+  border-color: #3b82f6;
+}
+
+html.light-mode .diary-item-meta {
+  color: #64748b;
+}
+
+/* 深色模式日记 */
+html.dark-mode .diary-list,
+html.dark-mode .diary-editor {
+  background: #151515;
+  border-color: #2a2a2a;
+}
+
+html.dark-mode .diary-item {
+  background: #1f1f1f;
+  border-color: #2a2a2a;
+}
+
+html.dark-mode .diary-item:hover,
+html.dark-mode .diary-item.active {
+  background: #2a2a2a;
+  border-color: #3f3f46;
+}
+
+
+/* 角色提示词库固定高度 */
+.role-prompts-wrapper {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.prompt-cell {
+  max-width: 400px;
+  max-height: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* 白天模式AI聊天气泡文字颜色 */
+html.light-mode .wechat-bubble {
+  color: #000000;
+}
+
+html.light-mode .wechat-bubble.assistant {
+  background: #e2e8f0;
+  color: #000000;
+}
+
+html.light-mode .wechat-bubble.user {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+html.light-mode .bubble-body {
+  color: #000000;
+}
+
+html.light-mode .bubble-body code {
+  background: rgba(0, 0, 0, 0.1);
+  color: #000000;
+}
+
+html.light-mode .bubble-body pre {
+  background: #f1f5f9;
+  color: #000000;
+  border-color: #e2e8f0;
+}
+
+
+/* 相册样式 */
+.album-container {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  min-height: 500px;
+}
+
+.album-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.album-create {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.album-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 450px;
+}
+
+.album-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.album-item:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.album-item.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.album-cover {
+  width: 50px;
+  height: 50px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.album-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.album-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.album-desc {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photo-area {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.photo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.photo-header h4 {
+  margin: 0;
+}
+
+.photo-upload {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.photo-upload input {
+  width: 150px;
+}
+
+.upload-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #2563eb, #22d3ee);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.photo-item {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.photo-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.photo-item:hover .photo-overlay {
+  opacity: 1;
+}
+
+.photo-caption {
+  font-size: 12px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+}
+
+.photo-pagination {
+  text-align: center;
+  margin-top: 16px;
+}
+
+/* 签到按钮样式 */
+.check-in-card .pill-row {
+  margin-top: 8px;
+}
+
+.check-in-btn {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.check-in-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+}
+
+.check-in-btn:disabled {
+  background: linear-gradient(135deg, #6b7280, #4b5563);
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+/* 首页分区标题 */
+.section-title {
+  margin-bottom: 16px;
+}
+
+.section-title h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #e5edff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+html.light-mode .section-title h3 {
+  color: #1e293b;
+}
+
+/* 用户管理样式 */
+.user-search-bar {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.search-field label {
+  font-size: 12px;
+  color: #9fb2d8;
+}
+
+.search-field input,
+.search-field select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e5edff;
+  font-size: 14px;
+}
+
+.search-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.user-table th,
+.user-table td {
+  padding: 12px 10px;
+  font-size: 14px;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.role-badge.admin {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(245, 158, 11, 0.2));
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.role-badge.user {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.user-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  margin-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.page-info {
+  color: #9fb2d8;
+  font-size: 13px;
+}
+
+.page-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-num {
+  padding: 0 12px;
+  color: #e5edff;
+  font-size: 14px;
+}
+
+button.small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* 网站跳转链接 */
+.ghost-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 16px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.ghost-link:hover {
+  background: rgba(59, 130, 246, 0.2);
+  transform: scale(1.1);
+}
+
+html.light-mode .ghost-link {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.4);
+}
+
+html.light-mode .ghost-link:hover {
+  background: rgba(96, 165, 250, 0.25);
+}
+
+/* 浅色模式用户管理 */
+html.light-mode .user-search-bar {
+  background: #f8fafc;
+  border-color: #e5e7eb;
+}
+
+html.light-mode .search-field label {
+  color: #64748b;
+}
+
+html.light-mode .search-field input,
+html.light-mode .search-field select {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #1e293b;
+}
+
+html.light-mode .role-badge.admin {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+html.light-mode .role-badge.user {
+  background: rgba(96, 165, 250, 0.15);
+  color: #3b82f6;
+  border-color: rgba(96, 165, 250, 0.4);
+}
+
+html.light-mode .page-info {
+  color: #64748b;
+}
+
+html.light-mode .page-num {
+  color: #1e293b;
+}
+
+/* 浅色模式相册 */
+html.light-mode .album-create,
+html.light-mode .album-item,
+html.light-mode .photo-area {
+  background: #ffffff;
+  border-color: #e5e7eb;
+}
+
+html.light-mode .album-item:hover {
+  background: #eff6ff;
+}
+
+html.light-mode .album-item.active {
+  background: #dbeafe;
+  border-color: #3b82f6;
+}
+
+html.light-mode .album-cover {
+  background: #f1f5f9;
+}
+
+
+/* 照片预览弹窗 */
+.photo-preview {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.photo-preview img {
+  max-width: 90vw;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.preview-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  color: #fff;
+  border-radius: 0 0 12px 12px;
+  text-align: center;
+}
+
+.preview-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+}
+
+.preview-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 拖动上传样式 */
+.photo-area.drag-over {
+  border: 2px dashed #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.drag-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(59, 130, 246, 0.15);
+  border-radius: 12px;
+  font-size: 18px;
+  color: #3b82f6;
+  z-index: 10;
+}
+
+.drag-tip {
+  text-align: center;
+  padding: 40px;
+}
+
+.photo-item {
+  cursor: pointer;
+}
+
+.photo-item:hover {
+  transform: scale(1.02);
+  transition: transform 0.2s;
+}
+
+/* --------- 消息通知样式 --------- */
+.notification-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 320px;
+}
+
+.notification-item {
+  background: linear-gradient(135deg, #1e40af, #3b82f6);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  color: #fff;
+}
+
+.notification-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.notification-content {
+  font-size: 13px;
+  opacity: 0.9;
+  word-break: break-word;
+}
+
+.notification-enter-active,
+.notification-leave-active {
+  transition: all 0.3s ease;
+}
+
+.notification-enter-from {
+  opacity: 0;
+  transform: translateX(100px);
+}
+
+.notification-leave-to {
+  opacity: 0;
+  transform: translateX(100px);
+}
+
+/* 浅色模式通知 */
+html.light-mode .notification-item {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #000000;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+html.light-mode .notification-title {
+  color: #1e40af;
+}
+
+html.light-mode .notification-content {
+  color: #374151;
 }

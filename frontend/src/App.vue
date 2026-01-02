@@ -5,12 +5,13 @@ import { startChristmasEffects, stopChristmasEffects } from './utils/christmasEf
 
 const apiBase = import.meta.env.DEV
   ? (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8001')
-  : '/api'
+  : ''
 
 const loading = ref(false)
 const chatLoading = ref(false)
 const status = ref({ type: '', message: '' })
 const activeMenu = ref('home')
+const expandedMenus = ref({ chat: false, admin: false, favorites: false })
 const themeMode = ref(localStorage.getItem('themeMode') || 'dark')
 const christmasActive = ref(false)
 
@@ -45,6 +46,37 @@ const peerInput = ref('')
 const peerSending = ref(false)
 const peerMessagesLoading = ref(false)
 const contactSearch = ref('')
+
+// 用户管理搜索和分页
+const userSearch = ref({ name: '', role: '', phone: '' })
+const userPage = ref(1)
+const userPageSize = 10
+
+// 日记相关状态
+const diaries = ref([])
+const selectedDiary = ref(null)
+const diaryForm = ref({ title: '', content: '', mood: '😊' })
+const diaryEditing = ref(false)
+
+// 相册相关状态
+const albums = ref([])
+const selectedAlbum = ref(null)
+const albumPhotos = ref([])
+const albumForm = ref({ name: '', description: '' })
+const photoCaption = ref('')
+const photoUploading = ref(false)
+const previewPhoto = ref(null)
+const isDragging = ref(false)
+const showAllPhotos = ref(false)
+const photosPerPage = 12
+
+// 签到相关状态
+const checkInLoading = ref(false)
+const todayCheckedIn = ref(false)
+
+// 消息通知状态
+const notifications = ref([])
+let notificationId = 0
 
 // 地图相关状态
 const mapLoaded = ref(false)
@@ -155,6 +187,29 @@ const availableContacts = computed(() => {
 })
 
 const selectedPeer = computed(() => contacts.value.find((item) => item.id === selectedPeerId.value) || null)
+
+// 照片分页显示
+const displayedPhotos = computed(() => {
+  if (showAllPhotos.value) return albumPhotos.value
+  return albumPhotos.value.slice(0, photosPerPage)
+})
+
+// 用户筛选和分页
+const filteredUsers = computed(() => {
+  return users.value.filter(u => {
+    if (userSearch.value.name && !u.name.toLowerCase().includes(userSearch.value.name.toLowerCase())) return false
+    if (userSearch.value.role && u.role !== userSearch.value.role) return false
+    if (userSearch.value.phone && u.phone && !u.phone.includes(userSearch.value.phone)) return false
+    return true
+  })
+})
+
+const paginatedUsers = computed(() => {
+  const start = (userPage.value - 1) * userPageSize
+  return filteredUsers.value.slice(start, start + userPageSize)
+})
+
+const userTotalPages = computed(() => Math.ceil(filteredUsers.value.length / userPageSize) || 1)
 
 let statusTimer = null
 function setStatus(type, message) {
@@ -330,7 +385,9 @@ async function request(path, options = {}) {
 }
 
 async function fetchDashboard() {
-  const data = await request('/dashboard')
+  // 使用地图位置的城市，默认威县
+  const city = userLocation.value?.city || '威县'
+  const data = await request(`/dashboard?city=${encodeURIComponent(city)}`)
   dashboard.value = data
 }
 
@@ -364,6 +421,277 @@ async function fetchCategories() {
 async function fetchPages(categoryId = null) {
   const query = categoryId ? `?category_id=${categoryId}` : ''
   pages.value = await request(`/web/pages${query}`)
+}
+
+// 日记相关函数
+async function fetchDiaries() {
+  try {
+    diaries.value = await request('/diaries')
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function createDiary() {
+  try {
+    await request('/diaries', {
+      method: 'POST',
+      body: JSON.stringify(diaryForm.value),
+    })
+    setStatus('success', '日记已保存')
+    diaryForm.value = { title: '', content: '', mood: '😊' }
+    await fetchDiaries()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function updateDiary() {
+  if (!selectedDiary.value) return
+  try {
+    await request(`/diaries/${selectedDiary.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(diaryForm.value),
+    })
+    setStatus('success', '日记已更新')
+    diaryEditing.value = false
+    selectedDiary.value = null
+    diaryForm.value = { title: '', content: '', mood: '😊' }
+    await fetchDiaries()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deleteDiary(id) {
+  if (!confirm('确认删除这篇日记吗？')) return
+  try {
+    await request(`/diaries/${id}`, { method: 'DELETE' })
+    setStatus('success', '日记已删除')
+    if (selectedDiary.value?.id === id) {
+      selectedDiary.value = null
+      diaryEditing.value = false
+    }
+    await fetchDiaries()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function openDiaryEdit(diary) {
+  selectedDiary.value = diary
+  diaryForm.value = { title: diary.title, content: diary.content, mood: diary.mood || '😊' }
+  diaryEditing.value = true
+}
+
+function cancelDiaryEdit() {
+  selectedDiary.value = null
+  diaryEditing.value = false
+  diaryForm.value = { title: '', content: '', mood: '😊' }
+}
+
+// 签到相关函数
+async function handleCheckIn() {
+  if (checkInLoading.value || todayCheckedIn.value) return
+  checkInLoading.value = true
+  try {
+    const res = await request('/user/check_in', { method: 'POST' })
+    setStatus('success', `签到成功！连续${res.LDC}天，奖励${res.reward}积分`)
+    todayCheckedIn.value = true
+    // 更新本地用户信息
+    if (currentUser.value) {
+      currentUser.value.LDC = res.LDC
+      currentUser.value.balance = res.balance
+      localStorage.setItem('user', JSON.stringify(currentUser.value))
+    }
+  } catch (error) {
+    setStatus('error', error.message)
+  } finally {
+    checkInLoading.value = false
+  }
+}
+
+function checkTodayCheckIn() {
+  // 检查今天是否已签到（通过比较 last_check_in）
+  if (currentUser.value?.last_check_in) {
+    const today = new Date().toISOString().split('T')[0]
+    todayCheckedIn.value = currentUser.value.last_check_in === today
+  } else {
+    todayCheckedIn.value = false
+  }
+}
+
+// 相册相关函数
+async function fetchAlbums() {
+  try {
+    albums.value = await request('/albums')
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function createAlbum() {
+  if (!albumForm.value.name.trim()) {
+    setStatus('error', '请输入相册名称')
+    return
+  }
+  try {
+    await request('/albums', {
+      method: 'POST',
+      body: JSON.stringify(albumForm.value),
+    })
+    setStatus('success', '相册已创建')
+    albumForm.value = { name: '', description: '' }
+    await fetchAlbums()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deleteAlbum(id) {
+  if (!confirm('确认删除该相册及所有照片吗？')) return
+  try {
+    await request(`/albums/${id}`, { method: 'DELETE' })
+    setStatus('success', '相册已删除')
+    if (selectedAlbum.value?.id === id) {
+      selectedAlbum.value = null
+      albumPhotos.value = []
+    }
+    await fetchAlbums()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function openAlbum(album) {
+  selectedAlbum.value = album
+  showAllPhotos.value = false
+  try {
+    albumPhotos.value = await request(`/albums/${album.id}/photos`)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function uploadPhoto(event) {
+  const file = event.target.files?.[0]
+  if (!file || !selectedAlbum.value) return
+  
+  photoUploading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('album_id', selectedAlbum.value.id)
+    formData.append('caption', photoCaption.value)
+    
+    const headers = {}
+    if (token.value) {
+      headers.Authorization = `Bearer ${token.value}`
+    }
+    
+    const response = await fetch(`${apiBase}/photos/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      throw new Error(data.detail || '上传失败')
+    }
+    
+    setStatus('success', '照片已上传')
+    photoCaption.value = ''
+    event.target.value = ''
+    await openAlbum(selectedAlbum.value)
+    await fetchAlbums() // 刷新封面
+  } catch (error) {
+    setStatus('error', error.message)
+  } finally {
+    photoUploading.value = false
+  }
+}
+
+async function deletePhoto(id) {
+  if (!confirm('确认删除这张照片吗？')) return
+  try {
+    await request(`/photos/${id}`, { method: 'DELETE' })
+    setStatus('success', '照片已删除')
+    await openAlbum(selectedAlbum.value)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function openPreview(photo) {
+  previewPhoto.value = photo
+}
+
+function closePreview() {
+  previewPhoto.value = null
+}
+
+function handleDragOver(e) {
+  e.preventDefault()
+  isDragging.value = true
+}
+
+function handleDragLeave(e) {
+  e.preventDefault()
+  isDragging.value = false
+}
+
+async function handleDrop(e) {
+  e.preventDefault()
+  isDragging.value = false
+  
+  if (!selectedAlbum.value) {
+    setStatus('error', '请先选择一个相册')
+    return
+  }
+  
+  const files = e.dataTransfer?.files
+  if (!files || files.length === 0) return
+  
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue
+    await uploadFileToAlbum(file)
+  }
+}
+
+async function uploadFileToAlbum(file) {
+  photoUploading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('album_id', selectedAlbum.value.id)
+    formData.append('caption', photoCaption.value)
+    
+    const headers = {}
+    if (token.value) {
+      headers.Authorization = `Bearer ${token.value}`
+    }
+    
+    const response = await fetch(`${apiBase}/photos/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      throw new Error(data.detail || '上传失败')
+    }
+    
+    setStatus('success', '照片已上传')
+    photoCaption.value = ''
+    await openAlbum(selectedAlbum.value)
+    await fetchAlbums()
+  } catch (error) {
+    setStatus('error', error.message)
+  } finally {
+    photoUploading.value = false
+  }
 }
 
 async function fetchRoles() {
@@ -472,6 +800,8 @@ async function syncAll() {
       fetchRolePrompts(),
       fetchLogs(),
       fetchContacts(),
+      fetchDiaries(),
+      fetchAlbums(),
     ])
     setStatus('success', '数据已同步')
   } catch (error) {
@@ -491,6 +821,7 @@ async function handleLogin() {
     modals.value.login = false
     setStatus('success', '登录成功')
     await syncAll()
+    checkTodayCheckIn()
     connectWs()
   } catch (error) {
     setStatus('error', error.message)
@@ -840,6 +1171,25 @@ async function deleteUser(userId) {
   }
 }
 
+async function resetUserPassword(userId, userName) {
+  const newPassword = prompt(`重置 ${userName} 的密码为：`, '123456')
+  if (!newPassword) return
+  try {
+    await request(`/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ password: newPassword }),
+    })
+    setStatus('success', `${userName} 密码已重置`)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function resetUserSearch() {
+  userSearch.value = { name: '', role: '', phone: '' }
+  userPage.value = 1
+}
+
 async function updateProfile() {
   try {
     const payload = { name: forms.value.profileEdit.name }
@@ -1016,8 +1366,11 @@ function getUserLocation() {
           lng,
           lat,
           address: result.formattedAddress || '未知地址',
-          city: result.addressComponent?.city || '未知城市',
+          city: result.addressComponent?.city || result.addressComponent?.district || '威县',
         }
+        
+        // 定位成功后刷新天气
+        fetchDashboard()
         
         // 设置地图中心（不使用动画）
         mapInstance.value.setCenter([lng, lat])
@@ -1695,7 +2048,9 @@ function buildWsUrl() {
   // 支持 apiBase 有无 path
   // http://x:8001 -> ws://x:8001/ws?token=...
   // https://... -> wss://...
-  const base = new URL(apiBase)
+  // 空字符串时使用当前页面地址
+  const baseUrl = apiBase || window.location.origin
+  const base = new URL(baseUrl)
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   base.pathname = '/ws'
   base.search = `?token=${encodeURIComponent(token.value || '')}`
@@ -1745,21 +2100,39 @@ function resolveOtherPeerId(msg) {
   return Number(msg.sender_id)
 }
 
+function showNotification(title, content) {
+  const id = ++notificationId
+  notifications.value.push({ id, title, content })
+  setTimeout(() => {
+    notifications.value = notifications.value.filter(n => n.id !== id)
+  }, 4000)
+}
+
 function handleIncomingPeerMessage(msg) {
   const otherId = resolveOtherPeerId(msg)
   if (!otherId) return
 
   setLastPreview(otherId, msg.content)
 
+  // 是否是别人发给我的消息
+  const isFromOther = Number(msg.sender_id) !== Number(currentUser.value?.id)
+
   // 当前会话
   if (Number(selectedPeerId.value) === Number(otherId)) {
     upsertPeerMessage(msg)
     clearUnread(otherId)
+    // 当前会话也显示通知（如果是别人发的）
+    if (isFromOther) {
+      showNotification(msg.sender_name || '新消息', msg.content)
+    }
     return
   }
 
-  // 非当前会话 -> 未读 + 轻提示
+  // 非当前会话 -> 未读 + 通知
   incUnread(otherId)
+  if (isFromOther) {
+    showNotification(msg.sender_name || '新消息', msg.content)
+  }
 }
 
 function handleWsMessage(evt) {
@@ -1769,18 +2142,27 @@ function handleWsMessage(evt) {
   // 支持后端回 'pong' / 'ping'
   if (raw === 'pong' || raw === 'ping') return
 
+  console.log('[WS] 收到消息:', raw)
+
   const payload = typeof raw === 'string' ? safeJsonParse(raw) : raw
 
-  if (!payload) return
+  if (!payload) {
+    console.log('[WS] 解析失败')
+    return
+  }
+
+  console.log('[WS] 解析后:', payload)
 
   // 兼容两种格式：
   // 1) { type: 'peer_message', data: {...} }
   // 2) 直接就是消息体 {...sender_id, receiver_id, content...}
   if (payload.type === 'peer_message' && payload.data) {
+    console.log('[WS] 处理 peer_message')
     handleIncomingPeerMessage(payload.data)
     return
   }
   if (payload.sender_id && payload.receiver_id && payload.content) {
+    console.log('[WS] 处理直接消息')
     handleIncomingPeerMessage(payload)
     return
   }
@@ -1876,6 +2258,7 @@ onMounted(() => {
   window.addEventListener('hashchange', syncRouteFromLocation)
   if (token.value) {
     syncAll()
+    checkTodayCheckIn()
     connectWs()
   }
 })
@@ -1904,6 +2287,17 @@ watch(activeMenu, (newMenu, oldMenu) => {
 <template>
   <div class="app-shell" :class="[themeMode, { 'christmas-on': christmasActive }]"><!--
     圣诞按钮触发飘雪效果，主题类用于切换深浅色。-->
+    
+    <!-- 右上角消息通知 -->
+    <div class="notification-container">
+      <transition-group name="notification">
+        <div v-for="n in notifications" :key="n.id" class="notification-item">
+          <div class="notification-title">{{ n.title }}</div>
+          <div class="notification-content">{{ n.content.length > 50 ? n.content.slice(0, 50) + '...' : n.content }}</div>
+        </div>
+      </transition-group>
+    </div>
+    
     <aside class="sidebar">
       <div class="brand">
         <div class="logo">PM</div>
@@ -1914,30 +2308,64 @@ watch(activeMenu, (newMenu, oldMenu) => {
       </div>
       <nav class="menu">
         <button :class="{ active: activeMenu === 'home' }" @click="navigateTo('home')">首页</button>
-        <button :class="{ active: activeMenu === 'chat' }" @click="navigateTo('chat')" :disabled="!isAuthed">
-          星际聊天
+        
+        <!-- 聊天菜单组 -->
+        <div class="menu-group">
+          <button class="menu-parent" :class="{ expanded: expandedMenus.chat }" @click="expandedMenus.chat = !expandedMenus.chat">
+            聊天
+            <span class="arrow">{{ expandedMenus.chat ? '▼' : '▶' }}</span>
+          </button>
+          <div class="submenu" v-show="expandedMenus.chat">
+            <button :class="{ active: activeMenu === 'chat' }" @click="navigateTo('chat')" :disabled="!isAuthed">
+              星际聊天
+            </button>
+            <button :class="{ active: activeMenu === 'contacts' }" @click="navigateTo('contacts')" :disabled="!isAuthed">
+              站内聊天
+            </button>
+          </div>
+        </div>
+        
+        <!-- 后台设置菜单组 -->
+        <div class="menu-group" v-if="isAdmin">
+          <button class="menu-parent" :class="{ expanded: expandedMenus.admin }" @click="expandedMenus.admin = !expandedMenus.admin">
+            后台设置
+            <span class="arrow">{{ expandedMenus.admin ? '▼' : '▶' }}</span>
+          </button>
+          <div class="submenu" v-show="expandedMenus.admin">
+            <button :class="{ active: activeMenu === 'models' }" @click="navigateTo('models')" :disabled="!isAuthed">
+              大模型管理
+            </button>
+            <button :class="{ active: activeMenu === 'users' }" @click="navigateTo('users')" :disabled="!isAdmin">
+              用户与角色
+            </button>
+            <button :class="{ active: activeMenu === 'album' }" @click="navigateTo('album')" :disabled="!isAdmin">
+              相册管理
+            </button>
+            <button :class="{ active: activeMenu === 'logs' }" @click="navigateTo('logs')" :disabled="!isAdmin">
+              日志记录
+            </button>
+          </div>
+        </div>
+        
+        <!-- 收藏菜单组 -->
+        <div class="menu-group">
+          <button class="menu-parent" :class="{ expanded: expandedMenus.favorites }" @click="expandedMenus.favorites = !expandedMenus.favorites">
+            收藏
+            <span class="arrow">{{ expandedMenus.favorites ? '▼' : '▶' }}</span>
+          </button>
+          <div class="submenu" v-show="expandedMenus.favorites">
+            <button :class="{ active: activeMenu === 'web' }" @click="navigateTo('web')" :disabled="!isAuthed">
+              网页收藏
+            </button>
+          </div>
+        </div>
+        
+        <button :class="{ active: activeMenu === 'diary' }" @click="navigateTo('diary')" :disabled="!isAuthed">
+          日记
         </button>
-        <button
-          :class="{ active: activeMenu === 'contacts' }"
-          @click="navigateTo('contacts')"
-          :disabled="!isAuthed"
-        >
-          站内互聊
-        </button>
-        <button :class="{ active: activeMenu === 'models' }" @click="navigateTo('models')" :disabled="!isAuthed">
-          大模型管理
-        </button>
-        <button :class="{ active: activeMenu === 'web' }" @click="navigateTo('web')" :disabled="!isAuthed">
-          网页收藏
-        </button>
+        
         <button :class="{ active: activeMenu === 'map' }" @click="navigateTo('map')" :disabled="!isAuthed">
-          地图定位
-        </button>
-        <button :class="{ active: activeMenu === 'users' }" @click="navigateTo('users')" :disabled="!isAdmin">
-          用户与角色
-        </button>
-        <button :class="{ active: activeMenu === 'logs' }" @click="navigateTo('logs')" :disabled="!isAdmin">
-          日志记录
+          地图
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -2236,7 +2664,7 @@ watch(activeMenu, (newMenu, oldMenu) => {
             </div>
           </div>
 
-          <div class="table-wrapper" v-if="rolePrompts.length">
+          <div class="table-wrapper role-prompts-wrapper" v-if="rolePrompts.length">
             <div class="table-title">角色提示词库</div>
             <table class="table compact">
               <thead>
@@ -2249,7 +2677,7 @@ watch(activeMenu, (newMenu, oldMenu) => {
               <tbody>
                 <tr v-for="item in rolePrompts" :key="item.id">
                   <td>{{ item.name }}</td>
-                  <td>{{ item.prompt }}</td>
+                  <td class="prompt-cell">{{ item.prompt }}</td>
                   <td v-if="isAdmin" class="row-actions">
                     <button class="ghost" @click="openEditRolePrompt(item)">编辑</button>
                     <button class="ghost danger" @click="deleteRolePrompt(item.id)">删除</button>
@@ -2262,29 +2690,11 @@ watch(activeMenu, (newMenu, oldMenu) => {
 
         <!-- 首页 -->
         <section class="report-section" v-if="activeMenu === 'home'">
+          <!-- 数据面板（所有用户可见） -->
+          <div class="section-title">
+            <h3>📊 数据面板</h3>
+          </div>
           <div class="report-row stats-row">
-            <div class="report-card stat-card">
-              <div class="card-title">新增注册人数</div>
-              <div class="card-value">{{ dashboard.redis.register_count }}</div>
-              <p class="muted">实时同步 Redis 注册计数</p>
-              <div class="mini-bars">
-                <span
-                  v-for="(value, idx) in registerTrend"
-                  :key="`reg-${idx}`"
-                  class="bar"
-                  :style="{ height: `${Math.max(30, value * 3)}%` }"
-                ></span>
-              </div>
-            </div>
-            <div class="report-card stat-card">
-              <div class="card-title">在线人数</div>
-              <div class="card-value">{{ dashboard.redis.online_count }}</div>
-              <p class="muted">活跃会话实时态势</p>
-              <div class="pill-row">
-                <span class="pill success">高并发守护</span>
-                <span class="pill outline">低延迟</span>
-              </div>
-            </div>
             <div class="report-card stat-card">
               <div class="card-title">时间 / 天气</div>
               <div class="card-value">{{ dashboard.date || '-' }}</div>
@@ -2302,104 +2712,157 @@ watch(activeMenu, (newMenu, oldMenu) => {
                 <span class="pill outline">安全审计</span>
               </div>
             </div>
-          </div>
-
-          <div class="report-row main-row">
-            <div class="report-card radar-card">
-              <div class="card-head">
-                <div>
-                  <p class="eyebrow">运行态势</p>
-                  <h3>实时容量镜像</h3>
-                </div>
-                <span class="meta-chip">圣诞黑白一键触发</span>
-              </div>
-              <div class="radar-wrap">
-                <div class="radar-core">
-                  <div class="radar-ring"></div>
-                  <div class="radar-ring small"></div>
-                  <div class="radar-dot"></div>
-                  <div class="radar-value">{{ dashboard.redis.online_count }}</div>
-                  <p class="radar-desc">在线用户</p>
-                </div>
-                <div class="radar-meta">
-                  <p>注册：{{ dashboard.redis.register_count }}</p>
-                  <p>天气：{{ dashboard.weather || '晴朗' }}</p>
-                  <p>IP：{{ dashboard.ip || '-' }}</p>
-                </div>
-              </div>
-            </div>
-
-            <div class="report-card trend-card">
-              <div class="card-head">
-                <div>
-                  <p class="eyebrow">业务增长</p>
-                  <h3>请求与在线走势</h3>
-                </div>
-                <span class="meta-chip">近 10 组</span>
-              </div>
-              <div class="line-chart">
-                <div
-                  v-for="(value, idx) in reportTrend"
-                  :key="`trend-${idx}`"
-                  class="line-bar"
-                  :style="{ height: `${Math.min(140, value)}px` }"
+            <div class="report-card stat-card check-in-card">
+              <div class="card-title">每日签到</div>
+              <div class="card-value">{{ currentUser?.LDC || 0 }} 天</div>
+              <p class="muted">连续签到天数</p>
+              <div class="pill-row">
+                <button 
+                  class="check-in-btn" 
+                  @click="handleCheckIn" 
+                  :disabled="checkInLoading || todayCheckedIn"
                 >
-                  <span class="dot"></span>
-                  <span class="bar-label">{{ value }}</span>
-                </div>
+                  {{ checkInLoading ? '签到中...' : (todayCheckedIn ? '已签到 ✓' : '立即签到') }}
+                </button>
               </div>
             </div>
-
-            <div class="report-card circle-card">
-              <div class="card-head">
-                <div>
-                  <p class="eyebrow">资源占比</p>
-                  <h3>模型与角色</h3>
-                </div>
-                <span class="meta-chip">健康</span>
-              </div>
-              <div class="circle-wrap">
-                <div class="progress-circle">{{ models.length }}</div>
-                <p class="muted">已配置模型</p>
-                <div class="progress-circle alt">{{ rolePrompts.length || 0 }}</div>
-                <p class="muted">预设提示词</p>
+            <div class="report-card stat-card">
+              <div class="card-title">我的余额</div>
+              <div class="card-value">{{ currentUser?.balance?.toFixed(1) || 0 }}</div>
+              <p class="muted">积分账户</p>
+              <div class="pill-row">
+                <span class="pill success">签到可得</span>
               </div>
             </div>
           </div>
 
-          <div class="report-row map-row">
-            <div class="report-card board-card" style="flex: 1;">
-              <div class="card-head">
-                <div>
-                  <p class="eyebrow">运维快照</p>
-                  <h3>实时提示面板</h3>
+          <!-- 系统运维（仅管理员可见） -->
+          <template v-if="isAdmin">
+            <div class="section-title" style="margin-top: 24px;">
+              <h3>🛠️ 系统运维</h3>
+            </div>
+            <div class="report-row stats-row">
+              <div class="report-card stat-card">
+                <div class="card-title">新增注册人数</div>
+                <div class="card-value">{{ dashboard.redis.register_count }}</div>
+                <p class="muted">实时同步 Redis 注册计数</p>
+                <div class="mini-bars">
+                  <span
+                    v-for="(value, idx) in registerTrend"
+                    :key="`reg-${idx}`"
+                    class="bar"
+                    :style="{ height: `${Math.max(30, value * 3)}%` }"
+                  ></span>
                 </div>
-                <span class="meta-chip">安全态</span>
               </div>
-              <div class="board-grid">
-                <div class="board-item">
-                  <p class="muted">圣诞黑白</p>
-                  <strong>{{ christmasActive ? '已启用' : '未启用' }}</strong>
-                  <small>点击顶部按钮即可触发飘雪与黑白</small>
-                </div>
-                <div class="board-item">
-                  <p class="muted">主题</p>
-                  <strong>{{ isDarkMode ? '黑暗模式' : '白天模式' }}</strong>
-                  <small>双模式随时切换</small>
-                </div>
-                <div class="board-item">
-                  <p class="muted">在线模型</p>
-                  <strong>{{ models.length }}</strong>
-                  <small>模型配置总数</small>
-                </div>
-                <div class="board-item">
-                  <p class="muted">在线人数</p>
-                  <strong>{{ dashboard.redis.online_count }}</strong>
-                  <small>实时在线用户</small>
+              <div class="report-card stat-card">
+                <div class="card-title">在线人数</div>
+                <div class="card-value">{{ dashboard.redis.online_count }}</div>
+                <p class="muted">活跃会话实时态势</p>
+                <div class="pill-row">
+                  <span class="pill success">高并发守护</span>
+                  <span class="pill outline">低延迟</span>
                 </div>
               </div>
             </div>
-          </div>
+
+            <div class="report-row main-row">
+              <div class="report-card radar-card">
+                <div class="card-head">
+                  <div>
+                    <p class="eyebrow">运行态势</p>
+                    <h3>实时容量镜像</h3>
+                  </div>
+                  <span class="meta-chip">圣诞黑白一键触发</span>
+                </div>
+                <div class="radar-wrap">
+                  <div class="radar-core">
+                    <div class="radar-ring"></div>
+                    <div class="radar-ring small"></div>
+                    <div class="radar-dot"></div>
+                    <div class="radar-value">{{ dashboard.redis.online_count }}</div>
+                    <p class="radar-desc">在线用户</p>
+                  </div>
+                  <div class="radar-meta">
+                    <p>注册：{{ dashboard.redis.register_count }}</p>
+                    <p>天气：{{ dashboard.weather || '晴朗' }}</p>
+                    <p>IP：{{ dashboard.ip || '-' }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="report-card trend-card">
+                <div class="card-head">
+                  <div>
+                    <p class="eyebrow">业务增长</p>
+                    <h3>请求与在线走势</h3>
+                  </div>
+                  <span class="meta-chip">近 10 组</span>
+                </div>
+                <div class="line-chart">
+                  <div
+                    v-for="(value, idx) in reportTrend"
+                    :key="`trend-${idx}`"
+                    class="line-bar"
+                    :style="{ height: `${Math.min(140, value)}px` }"
+                  >
+                    <span class="dot"></span>
+                    <span class="bar-label">{{ value }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="report-card circle-card">
+                <div class="card-head">
+                  <div>
+                    <p class="eyebrow">资源占比</p>
+                    <h3>模型与角色</h3>
+                  </div>
+                  <span class="meta-chip">健康</span>
+                </div>
+                <div class="circle-wrap">
+                  <div class="progress-circle">{{ models.length }}</div>
+                  <p class="muted">已配置模型</p>
+                  <div class="progress-circle alt">{{ rolePrompts.length || 0 }}</div>
+                  <p class="muted">预设提示词</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="report-row map-row">
+              <div class="report-card board-card" style="flex: 1;">
+                <div class="card-head">
+                  <div>
+                    <p class="eyebrow">运维快照</p>
+                    <h3>实时提示面板</h3>
+                  </div>
+                  <span class="meta-chip">安全态</span>
+                </div>
+                <div class="board-grid">
+                  <div class="board-item">
+                    <p class="muted">圣诞黑白</p>
+                    <strong>{{ christmasActive ? '已启用' : '未启用' }}</strong>
+                    <small>点击顶部按钮即可触发飘雪与黑白</small>
+                  </div>
+                  <div class="board-item">
+                    <p class="muted">主题</p>
+                    <strong>{{ isDarkMode ? '黑暗模式' : '白天模式' }}</strong>
+                    <small>双模式随时切换</small>
+                  </div>
+                  <div class="board-item">
+                    <p class="muted">在线模型</p>
+                    <strong>{{ models.length }}</strong>
+                    <small>模型配置总数</small>
+                  </div>
+                  <div class="board-item">
+                    <p class="muted">在线人数</p>
+                    <strong>{{ dashboard.redis.online_count }}</strong>
+                    <small>实时在线用户</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
         </section>
 
         <!-- 模型管理（原样保留） -->
@@ -2477,7 +2940,7 @@ watch(activeMenu, (newMenu, oldMenu) => {
               <button @click="modals.page = true" :disabled="!isAdmin || !categories.length">新增网页</button>
             </div>
           </div>
-          <div class="table-wrapper two-column">
+          <div class="table-wrapper web-bookmarks-layout">
             <div class="table-panel">
               <table class="table">
                 <thead>
@@ -2512,7 +2975,7 @@ watch(activeMenu, (newMenu, oldMenu) => {
                     <th>账号</th>
                     <th>密码</th>
                     <th>备注</th>
-                    <th v-if="isAdmin">操作</th>
+                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2521,9 +2984,12 @@ watch(activeMenu, (newMenu, oldMenu) => {
                     <td>{{ page.account || '无' }}</td>
                     <td>{{ page.password || '无' }}</td>
                     <td>{{ page.note || '无' }}</td>
-                    <td v-if="isAdmin">
-                      <button class="ghost" @click="openEditPage(page)">编辑</button>
-                      <button class="ghost danger" @click="deletePage(page.id)">删除</button>
+                    <td class="row-actions">
+                      <a :href="page.url" target="_blank" class="ghost-link" title="跳转到网站">🔗</a>
+                      <template v-if="isAdmin">
+                        <button class="ghost small" @click="openEditPage(page)">编辑</button>
+                        <button class="ghost danger small" @click="deletePage(page.id)">删除</button>
+                      </template>
                     </td>
                   </tr>
                   <tr v-if="!pages.length">
@@ -2531,6 +2997,148 @@ watch(activeMenu, (newMenu, oldMenu) => {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 相册管理 -->
+        <section class="panel neon-panel" v-if="activeMenu === 'album'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">相册管理</p>
+              <h3>照片存储与管理</h3>
+            </div>
+            <div class="header-actions">
+              <button @click="fetchAlbums">刷新</button>
+            </div>
+          </div>
+          
+          <div class="album-container">
+            <!-- 相册列表 -->
+            <div class="album-sidebar">
+              <div class="album-create">
+                <input v-model="albumForm.name" placeholder="相册名称" />
+                <input v-model="albumForm.description" placeholder="描述（可选）" />
+                <button @click="createAlbum">创建相册</button>
+              </div>
+              <div class="album-list">
+                <div class="album-item" v-for="album in albums" :key="album.id"
+                     :class="{ active: selectedAlbum?.id === album.id }"
+                     @click="openAlbum(album)">
+                  <div class="album-cover" :style="album.cover_url ? { backgroundImage: `url(${apiBase}${album.cover_url})` } : {}">
+                    <span v-if="!album.cover_url">📷</span>
+                  </div>
+                  <div class="album-info">
+                    <div class="album-name">{{ album.name }}</div>
+                    <div class="album-desc muted">{{ album.description || '无描述' }}</div>
+                  </div>
+                  <button class="ghost danger small" @click.stop="deleteAlbum(album.id)">删除</button>
+                </div>
+                <div v-if="!albums.length" class="empty muted">暂无相册</div>
+              </div>
+            </div>
+            
+            <!-- 照片区域 -->
+            <div class="photo-area" 
+                 @dragover="handleDragOver" 
+                 @dragleave="handleDragLeave" 
+                 @drop="handleDrop"
+                 :class="{ 'drag-over': isDragging }">
+              <div v-if="selectedAlbum" class="photo-header">
+                <h4>{{ selectedAlbum.name }}</h4>
+                <div class="photo-upload">
+                  <input v-model="photoCaption" placeholder="照片描述（可选）" />
+                  <label class="upload-btn">
+                    {{ photoUploading ? '上传中...' : '上传照片' }}
+                    <input type="file" accept="image/*" @change="uploadPhoto" :disabled="photoUploading" hidden />
+                  </label>
+                </div>
+              </div>
+              <div class="drag-hint" v-if="isDragging && selectedAlbum">
+                <span>📷 松开鼠标上传照片</span>
+              </div>
+              <div class="photo-grid" v-if="selectedAlbum && !isDragging">
+                <div class="photo-item" v-for="photo in displayedPhotos" :key="photo.id" @click="openPreview(photo)">
+                  <img :src="`${apiBase}${photo.url}`" :alt="photo.caption" />
+                  <div class="photo-overlay">
+                    <span class="photo-caption">{{ photo.caption || '' }}</span>
+                    <button class="ghost danger small" @click.stop="deletePhoto(photo.id)">删除</button>
+                  </div>
+                </div>
+                <div v-if="!albumPhotos.length" class="empty muted drag-tip">相册为空，拖动图片到此处或点击上传</div>
+              </div>
+              <div v-if="selectedAlbum && albumPhotos.length > photosPerPage" class="photo-pagination">
+                <button class="ghost" @click="showAllPhotos = !showAllPhotos">
+                  {{ showAllPhotos ? '收起' : `显示全部 (${albumPhotos.length})` }}
+                </button>
+              </div>
+              <div v-if="!selectedAlbum" class="empty muted" style="padding: 40px;">请选择一个相册</div>
+            </div>
+          </div>
+        </section>
+        
+        <!-- 照片预览弹窗 -->
+        <div class="modal-mask" v-if="previewPhoto" @click="closePreview">
+          <div class="photo-preview" @click.stop>
+            <img :src="`${apiBase}${previewPhoto.url}`" :alt="previewPhoto.caption" />
+            <div class="preview-info" v-if="previewPhoto.caption">{{ previewPhoto.caption }}</div>
+            <button class="preview-close" @click="closePreview">✕</button>
+          </div>
+        </div>
+
+        <!-- 日记 -->
+        <section class="panel neon-panel" v-if="activeMenu === 'diary'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">我的日记</p>
+              <h3>记录生活点滴</h3>
+            </div>
+            <div class="header-actions">
+              <button @click="fetchDiaries">刷新</button>
+            </div>
+          </div>
+          
+          <div class="diary-container">
+            <!-- 日记列表 -->
+            <div class="diary-list">
+              <div class="diary-item" v-for="diary in diaries" :key="diary.id" 
+                   :class="{ active: selectedDiary?.id === diary.id }"
+                   @click="openDiaryEdit(diary)">
+                <div class="diary-item-header">
+                  <span class="diary-mood">{{ diary.mood || '😊' }}</span>
+                  <span class="diary-title">{{ diary.title || '无标题' }}</span>
+                </div>
+                <div class="diary-item-meta">
+                  <span class="diary-date">{{ new Date(diary.created_at).toLocaleDateString() }}</span>
+                  <button class="ghost danger small" @click.stop="deleteDiary(diary.id)">删除</button>
+                </div>
+              </div>
+              <div v-if="!diaries.length" class="empty muted">暂无日记，开始写第一篇吧</div>
+            </div>
+            
+            <!-- 日记编辑区 -->
+            <div class="diary-editor">
+              <div class="diary-form">
+                <div class="diary-form-header">
+                  <input v-model="diaryForm.title" placeholder="日记标题..." class="diary-title-input" />
+                  <select v-model="diaryForm.mood" class="diary-mood-select">
+                    <option value="😊">😊 开心</option>
+                    <option value="😢">😢 难过</option>
+                    <option value="😡">😡 生气</option>
+                    <option value="😴">😴 疲惫</option>
+                    <option value="🤔">🤔 思考</option>
+                    <option value="😍">😍 幸福</option>
+                    <option value="😎">😎 自信</option>
+                    <option value="🥳">🥳 庆祝</option>
+                  </select>
+                </div>
+                <textarea v-model="diaryForm.content" placeholder="今天发生了什么..." class="diary-content-input"></textarea>
+                <div class="diary-form-actions">
+                  <button v-if="diaryEditing" class="ghost" @click="cancelDiaryEdit">取消</button>
+                  <button v-if="diaryEditing" @click="updateDiary">更新日记</button>
+                  <button v-else @click="createDiary" :disabled="!diaryForm.content.trim()">保存日记</button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -2683,45 +3291,87 @@ watch(activeMenu, (newMenu, oldMenu) => {
         <section class="panel" v-if="activeMenu === 'users' && isAdmin">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">用户</p>
-              <h3>用户与余额</h3>
+              <p class="eyebrow">用户管理</p>
+              <h3>用户列表</h3>
             </div>
             <div class="header-actions">
-              <button class="outline" @click="modals.role = true">角色分配</button>
-              <button @click="modals.user = true">新建用户</button>
+              <button @click="modals.user = true">+ 新建</button>
             </div>
           </div>
+          
+          <!-- 搜索筛选区 -->
+          <div class="user-search-bar">
+            <div class="search-field">
+              <label>用户名</label>
+              <input v-model="userSearch.name" placeholder="请输入" />
+            </div>
+            <div class="search-field">
+              <label>手机号</label>
+              <input v-model="userSearch.phone" placeholder="请输入" />
+            </div>
+            <div class="search-field">
+              <label>角色</label>
+              <select v-model="userSearch.role">
+                <option value="">全部</option>
+                <option value="admin">管理员</option>
+                <option value="user">普通用户</option>
+              </select>
+            </div>
+            <div class="search-actions">
+              <button @click="userPage = 1">查询</button>
+              <button class="ghost" @click="resetUserSearch">重置</button>
+            </div>
+          </div>
+          
+          <!-- 用户表格 -->
           <div class="table-wrapper">
-            <table class="table">
+            <table class="table user-table">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>昵称</th>
-                  <th>角色</th>
-                  <th>余额</th>
-                  <th>操作</th>
+                  <th style="width: 60px;">ID</th>
+                  <th>用户名</th>
+                  <th>邮箱</th>
+                  <th>手机号</th>
+                  <th style="width: 100px;">角色</th>
+                  <th style="width: 100px;">余额</th>
+                  <th style="width: 80px;">连签</th>
+                  <th style="width: 200px;">操作</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="user in users" :key="user.id">
+                <tr v-for="user in paginatedUsers" :key="user.id">
                   <td>{{ user.id }}</td>
                   <td>{{ user.name }}</td>
-                  <td><span class="tag">{{ user.role }}</span></td>
+                  <td>{{ user.email || '-' }}</td>
+                  <td>{{ user.phone || '-' }}</td>
+                  <td>
+                    <span :class="['role-badge', user.role]">
+                      {{ user.role === 'admin' ? '管理员' : '普通用户' }}
+                    </span>
+                  </td>
                   <td>¥ {{ user.balance.toFixed(2) }}</td>
+                  <td>{{ user.LDC || 0 }}天</td>
                   <td class="row-actions">
-                    <input type="number" v-model.number="forms.balance.amount" placeholder="调整金额" class="inline-input" />
-                    <button class="ghost" @click="forms.balance.userId = user.id; updateBalance(user.id)">
-                      调整余额
-                    </button>
-                    <button class="ghost" @click="openEditUser(user)">编辑</button>
-                    <button class="ghost danger" @click="deleteUser(user.id)">删除</button>
+                    <button class="ghost small" @click="openEditUser(user)">编辑</button>
+                    <button class="ghost small" @click="resetUserPassword(user.id, user.name)">重置密码</button>
+                    <button class="ghost danger small" @click="deleteUser(user.id)" :disabled="user.id === currentUser?.id">删除</button>
                   </td>
                 </tr>
-                <tr v-if="!users.length">
-                  <td colspan="5" class="muted">暂无用户</td>
+                <tr v-if="!paginatedUsers.length">
+                  <td colspan="8" class="muted">暂无用户</td>
                 </tr>
               </tbody>
             </table>
+          </div>
+          
+          <!-- 分页 -->
+          <div class="user-pagination" v-if="filteredUsers.length > userPageSize">
+            <span class="page-info">共 {{ filteredUsers.length }} 条</span>
+            <div class="page-btns">
+              <button class="ghost small" @click="userPage = Math.max(1, userPage - 1)" :disabled="userPage <= 1">上一页</button>
+              <span class="page-num">{{ userPage }} / {{ userTotalPages }}</span>
+              <button class="ghost small" @click="userPage = Math.min(userTotalPages, userPage + 1)" :disabled="userPage >= userTotalPages">下一页</button>
+            </div>
           </div>
         </section>
 

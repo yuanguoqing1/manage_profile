@@ -5,6 +5,8 @@ from __future__ import annotations
 from sqlmodel import SQLModel
 
 from app.db.session import engine
+from app.models import album as album_models  # noqa: F401
+from app.models import diary as diary_models  # noqa: F401
 from app.models import message as message_models  # noqa: F401
 from app.models import token as token_models  # noqa: F401
 from app.models import user as user_models  # noqa: F401

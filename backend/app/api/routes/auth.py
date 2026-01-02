@@ -75,6 +75,8 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)):
         role=user.role,
         email=user.email,
         phone=user.phone,
+        LDC=user.LDC or 0,
+        last_check_in=user.last_check_in,
     )
     return LoginResponse(token=token, user=public_user)
 
@@ -100,4 +102,6 @@ def get_me(user: User = Depends(get_current_user)):
         role=user.role,
         email=user.email,
         phone=user.phone,
+        LDC=user.LDC or 0,
+        last_check_in=user.last_check_in,
     )

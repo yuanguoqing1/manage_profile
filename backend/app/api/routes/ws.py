@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from sqlmodel import Session
@@ -35,28 +36,33 @@ async def ws_endpoint(ws: WebSocket):
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(exc.detail))
             return
 
-        await ws_manager.connect(user.id, ws)
-        try:
-            while True:
-                # 添加超时，避免无限阻塞
-                try:
-                    data = await asyncio.wait_for(ws.receive_text(), timeout=30.0)
-                    # 处理心跳
-                    if data in ("ping", "pong"):
-                        await ws.send_text("pong")
-                except asyncio.TimeoutError:
-                    # 超时后发送心跳检测
-                    try:
-                        await ws.send_text("ping")
-                    except Exception:  # noqa: BLE001
-                        break
-        except WebSocketDisconnect:
-            pass
-        except Exception:  # noqa: BLE001
-            pass
-        finally:
-            ws_manager.disconnect(user.id, ws)
+        user_id = user.id
+
+    await ws_manager.connect(user_id, ws)
+    try:
+        while True:
             try:
-                await ws.close()
-            except Exception:  # noqa: BLE001
-                pass
+                # 60秒超时，给前端足够时间发心跳
+                data = await asyncio.wait_for(ws.receive_text(), timeout=60.0)
+                # 处理心跳
+                if data in ("ping", "pong"):
+                    await ws.send_text("pong")
+                else:
+                    logging.debug(f"[WS] user_id={user_id} 收到: {data}")
+            except asyncio.TimeoutError:
+                # 超时后发送心跳检测
+                try:
+                    await ws.send_text("ping")
+                except Exception:
+                    logging.info(f"[WS] user_id={user_id} 心跳发送失败，断开")
+                    break
+    except WebSocketDisconnect:
+        logging.info(f"[WS] user_id={user_id} 客户端断开")
+    except Exception as e:
+        logging.warning(f"[WS] user_id={user_id} 异常: {e}")
+    finally:
+        ws_manager.disconnect(user_id, ws)
+        try:
+            await ws.close()
+        except Exception:
+            pass
