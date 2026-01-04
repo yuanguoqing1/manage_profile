@@ -131,3 +131,46 @@ class RolePromptPublic(SQLModel):
     id: int
     name: str
     prompt: str
+
+
+class SkillCreate(SQLModel):
+    title: str
+    category: str = "其他"
+    content: str
+    tags: Optional[str] = None
+
+
+class SkillUpdate(SQLModel):
+    title: Optional[str] = None
+    category: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[str] = None
+
+
+class SkillPublic(SQLModel):
+    id: int
+    title: str
+    category: str
+    content: str
+    tags: Optional[str]
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class SystemConfigCreate(SQLModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+
+
+class SystemConfigUpdate(SQLModel):
+    value: Optional[str] = None
+    description: Optional[str] = None
+
+
+class SystemConfigPublic(SQLModel):
+    id: int
+    key: str
+    value: str
+    description: Optional[str]
+    updated_at: Optional[str]

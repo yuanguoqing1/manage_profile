@@ -78,6 +78,19 @@ const todayCheckedIn = ref(false)
 const notifications = ref([])
 let notificationId = 0
 
+// 技能库相关状态
+const skills = ref([])
+const skillCategories = ref([])
+const selectedSkill = ref(null)
+const selectedSkillCategory = ref(null)
+const skillForm = ref({ title: '', category: '其他', content: '', tags: '' })
+const skillEditing = ref(false)
+const newSkillCategory = ref('')
+
+// 系统配置相关状态
+const systemConfigs = ref([])
+const configForm = ref({ key: '', value: '', description: '' })
+
 // 地图相关状态
 const mapLoaded = ref(false)
 const mapInstance = ref(null)
@@ -120,6 +133,8 @@ const modals = ref({
   userEdit: false,
   modelEdit: false,
   profileEdit: false,
+  skill: false,
+  skillEdit: false,
 })
 
 const forms = ref({
@@ -720,6 +735,153 @@ async function fetchLogs() {
   logs.value = res.lines || []
 }
 
+// ---------------------------
+// 技能库功能
+// ---------------------------
+async function fetchSkills(category = null) {
+  try {
+    const query = category ? `?category=${encodeURIComponent(category)}` : ''
+    skills.value = await request(`/skills${query}`)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function fetchSkillCategories() {
+  try {
+    const res = await request('/skills/categories')
+    skillCategories.value = res.categories || []
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function createSkill() {
+  try {
+    await request('/skills', {
+      method: 'POST',
+      body: JSON.stringify(skillForm.value),
+    })
+    setStatus('success', '技能已创建')
+    modals.value.skill = false
+    skillForm.value = { title: '', category: '其他', content: '', tags: '' }
+    await Promise.all([fetchSkills(selectedSkillCategory.value), fetchSkillCategories()])
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function updateSkill() {
+  if (!selectedSkill.value?.id) return
+  try {
+    await request(`/skills/${selectedSkill.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(skillForm.value),
+    })
+    setStatus('success', '技能已更新')
+    modals.value.skillEdit = false
+    selectedSkill.value = null
+    await fetchSkills(selectedSkillCategory.value)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deleteSkill(id) {
+  if (!confirm('确认删除该技能吗？')) return
+  try {
+    await request(`/skills/${id}`, { method: 'DELETE' })
+    setStatus('success', '技能已删除')
+    if (selectedSkill.value?.id === id) {
+      selectedSkill.value = null
+    }
+    await fetchSkills(selectedSkillCategory.value)
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+function openSkillDetail(skill) {
+  selectedSkill.value = skill
+}
+
+function openEditSkill(skill) {
+  selectedSkill.value = skill
+  skillForm.value = {
+    title: skill.title,
+    category: skill.category,
+    content: skill.content,
+    tags: skill.tags || '',
+  }
+  skillEditing.value = true
+  modals.value.skillEdit = true
+}
+
+function filterSkillsByCategory(category) {
+  selectedSkillCategory.value = category
+  fetchSkills(category)
+}
+
+function applyNewCategory() {
+  if (newSkillCategory.value.trim()) {
+    skillForm.value.category = newSkillCategory.value.trim()
+  }
+}
+
+// ---------------------------
+// 系统配置功能
+// ---------------------------
+async function fetchConfigs() {
+  if (!isAdmin.value) return
+  try {
+    systemConfigs.value = await request('/config')
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function updateConfig(key, value) {
+  try {
+    await request(`/config/${key}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    })
+    setStatus('success', '配置已更新')
+    await fetchConfigs()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function createConfig() {
+  if (!configForm.value.key.trim()) {
+    setStatus('error', '配置名称不能为空')
+    return
+  }
+  try {
+    await request('/config', {
+      method: 'POST',
+      body: JSON.stringify(configForm.value),
+    })
+    setStatus('success', '配置已创建')
+    configForm.value = { key: '', value: '', description: '' }
+    await fetchConfigs()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
+async function deleteConfig(key) {
+  if (!confirm(`确认删除配置 ${key} 吗？`)) return
+  try {
+    await request(`/config/${key}`, { method: 'DELETE' })
+    setStatus('success', '配置已删除')
+    await fetchConfigs()
+  } catch (error) {
+    setStatus('error', error.message)
+  }
+}
+
 function clearUnread(peerId) {
   if (!peerId) return
   unreadMap.value = { ...unreadMap.value, [peerId]: 0 }
@@ -802,6 +964,9 @@ async function syncAll() {
       fetchContacts(),
       fetchDiaries(),
       fetchAlbums(),
+      fetchSkills(),
+      fetchSkillCategories(),
+      fetchConfigs(),
     ])
     setStatus('success', '数据已同步')
   } catch (error) {
@@ -2338,8 +2503,11 @@ watch(activeMenu, (newMenu, oldMenu) => {
             <button :class="{ active: activeMenu === 'users' }" @click="navigateTo('users')" :disabled="!isAdmin">
               用户与角色
             </button>
-            <button :class="{ active: activeMenu === 'album' }" @click="navigateTo('album')" :disabled="!isAdmin">
+            <button :class="{ active: activeMenu === 'album' }" @click="navigateTo('album')" :disabled="!isAuthed">
               相册管理
+            </button>
+            <button :class="{ active: activeMenu === 'config' }" @click="navigateTo('config')" :disabled="!isAdmin">
+              系统配置
             </button>
             <button :class="{ active: activeMenu === 'logs' }" @click="navigateTo('logs')" :disabled="!isAdmin">
               日志记录
@@ -2366,6 +2534,10 @@ watch(activeMenu, (newMenu, oldMenu) => {
         
         <button :class="{ active: activeMenu === 'map' }" @click="navigateTo('map')" :disabled="!isAuthed">
           地图
+        </button>
+        
+        <button :class="{ active: activeMenu === 'skills' }" @click="navigateTo('skills')" :disabled="!isAuthed">
+          技能库
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -3287,6 +3459,80 @@ watch(activeMenu, (newMenu, oldMenu) => {
           </div>
         </section>
 
+        <!-- 技能库 -->
+        <section class="panel neon-panel" v-if="activeMenu === 'skills'">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">技能库</p>
+              <h3>命令与操作记录</h3>
+            </div>
+            <div class="header-actions">
+              <select v-model="selectedSkillCategory" @change="filterSkillsByCategory(selectedSkillCategory)" class="inline-input">
+                <option :value="null">全部分类</option>
+                <option v-for="cat in skillCategories" :key="cat" :value="cat">{{ cat }}</option>
+              </select>
+              <button class="outline" @click="fetchSkills(selectedSkillCategory)">刷新</button>
+              <button @click="modals.skill = true" :disabled="!isAdmin">新建技能</button>
+            </div>
+          </div>
+
+          <div class="table-wrapper two-column">
+            <div class="table-panel">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>标题</th>
+                    <th>分类</th>
+                    <th>标签</th>
+                    <th>更新时间</th>
+                    <th v-if="isAdmin">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="skill in skills"
+                    :key="skill.id"
+                    @click="openSkillDetail(skill)"
+                    class="clickable"
+                  >
+                    <td>{{ skill.title }}</td>
+                    <td><span class="tag">{{ skill.category }}</span></td>
+                    <td>{{ skill.tags || '-' }}</td>
+                    <td>{{ skill.updated_at ? new Date(skill.updated_at).toLocaleString() : '-' }}</td>
+                    <td v-if="isAdmin" class="row-actions">
+                      <button class="ghost" @click.stop="openEditSkill(skill)">编辑</button>
+                      <button class="ghost danger" @click.stop="deleteSkill(skill.id)">删除</button>
+                    </td>
+                  </tr>
+                  <tr v-if="!skills.length">
+                    <td :colspan="isAdmin ? 5 : 4" class="muted">暂无技能记录</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="detail-panel" v-if="selectedSkill">
+              <div class="skill-detail-header">
+                <h4>{{ selectedSkill.title }}</h4>
+                <span class="tag">{{ selectedSkill.category }}</span>
+              </div>
+              <p class="muted" v-if="selectedSkill.tags">标签：{{ selectedSkill.tags }}</p>
+              <div class="skill-content markdown-body" v-html="renderMarkdown(selectedSkill.content)"></div>
+              <div class="skill-meta">
+                <p class="muted small">创建：{{ selectedSkill.created_at ? new Date(selectedSkill.created_at).toLocaleString() : '-' }}</p>
+                <p class="muted small">更新：{{ selectedSkill.updated_at ? new Date(selectedSkill.updated_at).toLocaleString() : '-' }}</p>
+              </div>
+              <div class="row-actions" v-if="isAdmin">
+                <button class="ghost" @click="openEditSkill(selectedSkill)">编辑</button>
+                <button class="ghost danger" @click="deleteSkill(selectedSkill.id)">删除</button>
+              </div>
+            </div>
+            <div class="detail-panel" v-else>
+              <p class="muted">点击左侧列表查看技能详情</p>
+            </div>
+          </div>
+        </section>
+
         <!-- 用户与角色（原样保留） -->
         <section class="panel" v-if="activeMenu === 'users' && isAdmin">
           <div class="panel-header">
@@ -3372,6 +3618,61 @@ watch(activeMenu, (newMenu, oldMenu) => {
               <span class="page-num">{{ userPage }} / {{ userTotalPages }}</span>
               <button class="ghost small" @click="userPage = Math.min(userTotalPages, userPage + 1)" :disabled="userPage >= userTotalPages">下一页</button>
             </div>
+          </div>
+        </section>
+
+        <!-- 系统配置 -->
+        <section class="panel" v-if="activeMenu === 'config' && isAdmin">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">系统配置</p>
+              <h3>密钥与参数管理</h3>
+            </div>
+            <div class="header-actions">
+              <button class="outline" @click="fetchConfigs">刷新</button>
+            </div>
+          </div>
+          
+          <div class="config-list">
+            <div v-for="config in systemConfigs" :key="config.key" class="config-item">
+              <div class="config-header">
+                <span class="config-key">{{ config.key }}</span>
+                <span class="config-desc muted">{{ config.description || '无描述' }}</span>
+              </div>
+              <div class="config-body">
+                <input
+                  :type="config.key.includes('KEY') || config.key.includes('SECRET') ? 'password' : 'text'"
+                  :value="config.value"
+                  @blur="(e) => updateConfig(config.key, e.target.value)"
+                  placeholder="请输入配置值"
+                />
+                <button class="ghost danger" @click="deleteConfig(config.key)">删除</button>
+              </div>
+              <p class="muted small">更新时间：{{ config.updated_at ? new Date(config.updated_at).toLocaleString() : '-' }}</p>
+            </div>
+            
+            <div v-if="!systemConfigs.length" class="empty muted">
+              暂无配置项
+            </div>
+          </div>
+          
+          <div class="config-add">
+            <h4>添加新配置</h4>
+            <div class="config-form">
+              <input v-model="configForm.key" placeholder="配置名称（如：AMAP_KEY）" />
+              <input v-model="configForm.value" placeholder="配置值" />
+              <input v-model="configForm.description" placeholder="描述（可选）" />
+              <button @click="createConfig">添加</button>
+            </div>
+          </div>
+          
+          <div class="config-tips">
+            <h4>常用配置说明</h4>
+            <ul>
+              <li><strong>AMAP_KEY</strong>：高德地图 API Key，用于地图定位功能</li>
+              <li><strong>OPENAI_API_KEY</strong>：OpenAI API 密钥，用于 AI 对话</li>
+              <li><strong>OPENAI_BASE_URL</strong>：OpenAI API 地址（可选，用于代理）</li>
+            </ul>
           </div>
         </section>
 
@@ -3651,6 +3952,67 @@ watch(activeMenu, (newMenu, oldMenu) => {
           <label>手机号（可选）</label>
           <input v-model="forms.profileEdit.phone" placeholder="请输入手机号" />
           <button @click="updateProfile">保存</button>
+        </div>
+      </div>
+
+      <div v-if="modals.skill" class="modal-mask">
+        <div class="modal large">
+          <div class="modal-header">
+            <h3>新建技能</h3>
+            <button class="icon" @click="modals.skill = false">×</button>
+          </div>
+          <label>标题</label>
+          <input v-model="skillForm.title" placeholder="如：Ubuntu 安装 Python" />
+          <label>分类</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <select v-model="skillForm.category" style="flex: 1;">
+              <option value="">-- 选择已有分类 --</option>
+              <option v-for="cat in skillCategories" :key="cat" :value="cat">{{ cat }}</option>
+            </select>
+            <input v-model="newSkillCategory" placeholder="或输入新分类" style="flex: 1;" @blur="applyNewCategory" />
+          </div>
+          <label>标签（可选，逗号分隔）</label>
+          <input v-model="skillForm.tags" placeholder="如：ubuntu,python3.11,安装" />
+          <label>内容（支持 Markdown）</label>
+          <textarea v-model="skillForm.content" rows="12" placeholder="支持 Markdown 格式，代码块会自动高亮
+
+示例：
+## 安装 Python 3.11
+
+```bash
+sudo apt update
+sudo apt install python3.11
+```
+
+检查版本：
+```bash
+python3.11 --version
+```"></textarea>
+          <button @click="createSkill">保存</button>
+        </div>
+      </div>
+
+      <div v-if="modals.skillEdit" class="modal-mask">
+        <div class="modal large">
+          <div class="modal-header">
+            <h3>编辑技能</h3>
+            <button class="icon" @click="modals.skillEdit = false">×</button>
+          </div>
+          <label>标题</label>
+          <input v-model="skillForm.title" placeholder="如：Ubuntu 安装 Python" />
+          <label>分类</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <select v-model="skillForm.category" style="flex: 1;">
+              <option value="">-- 选择已有分类 --</option>
+              <option v-for="cat in skillCategories" :key="cat" :value="cat">{{ cat }}</option>
+            </select>
+            <input v-model="newSkillCategory" placeholder="或输入新分类" style="flex: 1;" @blur="applyNewCategory" />
+          </div>
+          <label>标签（可选，逗号分隔）</label>
+          <input v-model="skillForm.tags" placeholder="如：ubuntu,python3.11,安装" />
+          <label>内容（支持 Markdown）</label>
+          <textarea v-model="skillForm.content" rows="12" placeholder="支持 Markdown 格式"></textarea>
+          <button @click="updateSkill">更新</button>
         </div>
       </div>
     </main>
@@ -4001,5 +4363,196 @@ watch(activeMenu, (newMenu, oldMenu) => {
 .info-card strong {
   font-size: 16px;
   font-weight: 600;
+}
+
+/* 技能库样式 */
+.skill-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.skill-detail-header h4 {
+  margin: 0;
+  flex: 1;
+}
+
+.skill-content {
+  margin: 20px 0;
+  line-height: 1.8;
+}
+
+.skill-content pre {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.dark-mode .skill-content pre {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.skill-content code {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+  color: #e83e8c;
+}
+
+.dark-mode .skill-content code {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ff79c6;
+}
+
+.skill-content pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.skill-meta {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.dark-mode .skill-meta {
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.modal.large {
+  max-width: 800px;
+  width: 90%;
+}
+
+.modal.large textarea {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.category-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-input-group select,
+.category-input-group input {
+  margin: 0;
+}
+
+/* 系统配置样式 */
+.config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.config-item {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.dark-mode .config-item {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.config-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.config-key {
+  font-weight: 600;
+  font-family: 'Consolas', 'Monaco', monospace;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.dark-mode .config-key {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.config-body {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.config-body input {
+  flex: 1;
+  margin: 0;
+}
+
+.config-add {
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+
+.dark-mode .config-add {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.config-add h4 {
+  margin: 0 0 12px 0;
+}
+
+.config-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.config-form input {
+  flex: 1;
+  min-width: 150px;
+  margin: 0;
+}
+
+.config-form button {
+  white-space: nowrap;
+}
+
+.config-tips {
+  padding: 16px;
+  background: rgba(0, 100, 200, 0.05);
+  border-radius: 8px;
+  border-left: 4px solid rgba(0, 100, 200, 0.5);
+}
+
+.dark-mode .config-tips {
+  background: rgba(0, 100, 200, 0.1);
+}
+
+.config-tips h4 {
+  margin: 0 0 12px 0;
+}
+
+.config-tips ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.config-tips li {
+  margin-bottom: 8px;
+}
+
+.config-tips strong {
+  font-family: 'Consolas', 'Monaco', monospace;
 }
 </style>
