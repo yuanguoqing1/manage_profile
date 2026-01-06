@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Dict, List, Set
 
@@ -34,7 +35,10 @@ class ConnectionManager:
         for ws in conns:
             try:
                 await asyncio.wait_for(ws.send_json(payload), timeout=5.0)
-            except Exception:  # noqa: BLE001
+            except asyncio.TimeoutError:
+                logging.warning(f"WS send timeout user_id={user_id}")
+                dead.append(ws)
+            except (ConnectionResetError, RuntimeError, Exception):
                 dead.append(ws)
         for ws in dead:
             self.disconnect(user_id, ws)

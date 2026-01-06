@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import Depends, Header, HTTPException, status
 from sqlmodel import Session
 
-from app.crud.token import get_token
+from app.crud.token import get_token, update_user_activity
 from app.db.session import get_session
 from app.models.token import AuthToken
 from app.models.user import User
@@ -34,6 +34,10 @@ def get_current_user(
     user = session.get(User, record.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+    
+    # 更新用户活跃时间
+    update_user_activity(user.id)
+    
     return user
 
 
