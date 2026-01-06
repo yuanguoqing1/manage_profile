@@ -9,6 +9,7 @@ export const routes = [
   { path: '/skills', name: 'skills', menu: 'skills', requiresAuth: true },
   { path: '/diary', name: 'diary', menu: 'diary', requiresAuth: true },
   { path: '/album', name: 'album', menu: 'album', requiresAuth: true },
+  { path: '/github-trending', name: 'github-trending', menu: 'github-trending' },
   { path: '/users', name: 'users', menu: 'users', requiresAdmin: true },
   { path: '/config', name: 'config', menu: 'config', requiresAdmin: true },
   { path: '/logs', name: 'logs', menu: 'logs', requiresAdmin: true },

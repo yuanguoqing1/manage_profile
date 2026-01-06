@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { routes } from './router'
 import { startChristmasEffects, stopChristmasEffects } from './utils/christmasEffects'
+import GithubTrendingView from './views/GithubTrendingView.vue'
 
 const apiBase = import.meta.env.DEV
   ? (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8001')
@@ -399,10 +400,40 @@ async function request(path, options = {}) {
   return data
 }
 
+async function fetchCityByIP() {
+  // 使用高德 Web服务 API 获取城市（需要 Web服务类型的 Key）
+  const webKey = import.meta.env.VITE_AMAP_WEB_KEY || import.meta.env.VITE_AMAP_KEY
+  if (!webKey) return
+  
+  try {
+    const response = await fetch(`https://restapi.amap.com/v3/ip?key=${webKey}`)
+    const data = await response.json()
+    console.log('IP location result:', data)
+    
+    if (data.status === '1' && data.city) {
+      if (userLocation.value) {
+        userLocation.value.city = data.city
+        userLocation.value.address = data.province + data.city
+      } else {
+        userLocation.value = {
+          lng: 0,
+          lat: 0,
+          address: data.province + data.city,
+          city: data.city,
+        }
+      }
+      fetchDashboard()
+    }
+  } catch (err) {
+    console.error('IP location error:', err)
+  }
+}
+
 async function fetchDashboard() {
-  // 使用地图位置的城市，默认威县
-  const city = userLocation.value?.city || '威县'
-  const data = await request(`/dashboard?city=${encodeURIComponent(city)}`)
+  // 使用地图位置的城市
+  const city = userLocation.value?.city || ''
+  const query = city ? `?city=${encodeURIComponent(city)}` : ''
+  const data = await request(`/dashboard${query}`)
   dashboard.value = data
 }
 
@@ -1531,7 +1562,7 @@ function getUserLocation() {
           lng,
           lat,
           address: result.formattedAddress || '未知地址',
-          city: result.addressComponent?.city || result.addressComponent?.district || '威县',
+          city: result.addressComponent?.city || result.addressComponent?.district || '',
         }
         
         // 定位成功后刷新天气
@@ -1657,53 +1688,75 @@ async function requestBrowserLocation() {
         
         // 如果地图已加载，使用高德API进行逆地理编码获取地址
         if (window.AMap && mapLoaded.value) {
-          try {
-            const geocoder = new window.AMap.Geocoder()
-            geocoder.getAddress([lng, lat], (status, result) => {
-              if (status === 'complete' && result.info === 'OK') {
-                const addressComponent = result.regeocode.addressComponent
-                userLocation.value = {
-                  lng,
-                  lat,
-                  address: result.regeocode.formattedAddress,
-                  city: addressComponent.city || addressComponent.province,
+          // 先加载 Geocoder 插件
+          window.AMap.plugin('AMap.Geocoder', () => {
+            try {
+              const geocoder = new window.AMap.Geocoder()
+              geocoder.getAddress([lng, lat], (status, result) => {
+                if (status === 'complete' && result.info === 'OK') {
+                  const addressComponent = result.regeocode.addressComponent
+                  userLocation.value = {
+                    lng,
+                    lat,
+                    address: result.regeocode.formattedAddress,
+                    city: addressComponent.city || addressComponent.province,
+                  }
+                  
+                  // 更新地图中心和标记
+                  mapInstance.value.setCenter([lng, lat])
+                  
+                  if (mapMarker.value) {
+                    mapMarker.value.setMap(null)
+                  }
+                  
+                  mapMarker.value = new window.AMap.Marker({
+                    position: [lng, lat],
+                    title: '我的位置',
+                  })
+                  
+                  mapInstance.value.add(mapMarker.value)
+                  fetchDashboard()
+                  setStatus('success', '✓ 定位成功！')
+                } else {
+                  // 逆地理编码失败，使用 IP 定位
+                  console.log('Geocoder failed, using IP location')
+                  userLocation.value = {
+                    lng,
+                    lat,
+                    address: `坐标: ${lng.toFixed(4)}, ${lat.toFixed(4)}`,
+                    city: '',
+                  }
+                  
+                  // 更新地图中心和标记
+                  mapInstance.value.setCenter([lng, lat])
+                  
+                  if (mapMarker.value) {
+                    mapMarker.value.setMap(null)
+                  }
+                  
+                  mapMarker.value = new window.AMap.Marker({
+                    position: [lng, lat],
+                    title: '我的位置',
+                  })
+                  
+                  mapInstance.value.add(mapMarker.value)
+                  fetchCityByIP()
+                  setStatus('success', '✓ 定位成功！')
                 }
-                
-                // 更新地图中心和标记
-                mapInstance.value.setCenter([lng, lat])
-                
-                if (mapMarker.value) {
-                  mapMarker.value.setMap(null)
-                }
-                
-                mapMarker.value = new window.AMap.Marker({
-                  position: [lng, lat],
-                  title: '我的位置',
-                })
-                
-                mapInstance.value.add(mapMarker.value)
-                
-                setStatus('success', '✓ 定位成功！')
-              } else {
-                // 逆地理编码失败，仍然显示坐标
-                userLocation.value = {
-                  lng,
-                  lat,
-                  address: '地址解析中...',
-                  city: '未知',
-                }
-                setStatus('success', '定位成功，但地址解析失败')
+              })
+            } catch (err) {
+              console.error('Geocoder error:', err)
+              userLocation.value = {
+                lng,
+                lat,
+                address: `坐标: ${lng.toFixed(4)}, ${lat.toFixed(4)}`,
+                city: '',
               }
-            })
-          } catch (err) {
-            userLocation.value = {
-              lng,
-              lat,
-              address: '地址解析失败',
-              city: '未知',
+              mapInstance.value.setCenter([lng, lat])
+              fetchCityByIP()
+              setStatus('success', '✓ 定位成功！')
             }
-            setStatus('warning', '定位成功，但地址解析失败')
-          }
+          })
         } else {
           // 地图未加载，只显示坐标
           userLocation.value = {
@@ -2426,6 +2479,8 @@ onMounted(() => {
     checkTodayCheckIn()
     connectWs()
   }
+  // 尝试通过 IP 获取城市（作为备选）
+  fetchCityByIP()
 })
 
 onBeforeUnmount(() => {
@@ -2538,6 +2593,10 @@ watch(activeMenu, (newMenu, oldMenu) => {
         
         <button :class="{ active: activeMenu === 'skills' }" @click="navigateTo('skills')" :disabled="!isAuthed">
           技能库
+        </button>
+        
+        <button :class="{ active: activeMenu === 'github-trending' }" @click="navigateTo('github-trending')">
+          GitHub热点
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -3375,19 +3434,19 @@ watch(activeMenu, (newMenu, oldMenu) => {
             <div v-if="userLocation" class="location-info">
               <div class="info-card">
                 <span class="label">经度</span>
-                <strong>{{ userLocation.lng.toFixed(6) }}</strong>
+                <strong>{{ typeof userLocation.lng === 'number' ? userLocation.lng.toFixed(6) : '未知' }}</strong>
               </div>
               <div class="info-card">
                 <span class="label">纬度</span>
-                <strong>{{ userLocation.lat.toFixed(6) }}</strong>
+                <strong>{{ typeof userLocation.lat === 'number' ? userLocation.lat.toFixed(6) : '未知' }}</strong>
               </div>
               <div class="info-card">
                 <span class="label">城市</span>
-                <strong>{{ userLocation.city }}</strong>
+                <strong>{{ userLocation.city || '未知' }}</strong>
               </div>
               <div class="info-card full-width">
                 <span class="label">详细地址</span>
-                <strong>{{ userLocation.address }}</strong>
+                <strong>{{ userLocation.address || '未知地址' }}</strong>
               </div>
             </div>
 
@@ -3531,6 +3590,11 @@ watch(activeMenu, (newMenu, oldMenu) => {
               <p class="muted">点击左侧列表查看技能详情</p>
             </div>
           </div>
+        </section>
+
+        <!-- GitHub 热点 -->
+        <section class="panel neon-panel" v-if="activeMenu === 'github-trending'">
+          <GithubTrendingView />
         </section>
 
         <!-- 用户与角色（原样保留） -->

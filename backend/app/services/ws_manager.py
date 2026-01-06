@@ -33,7 +33,7 @@ class ConnectionManager:
         dead: List[WebSocket] = []
         for ws in conns:
             try:
-                await ws.send_json(payload)
+                await asyncio.wait_for(ws.send_json(payload), timeout=5.0)
             except Exception:  # noqa: BLE001
                 dead.append(ws)
         for ws in dead:

@@ -15,6 +15,7 @@
     "vue": "^3.4.27"
   },
   "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^1.0.1",
     "@vitejs/plugin-vue": "^4.5.2",
     "terser": "^5.44.1",
     "vite": "^4.4.9"

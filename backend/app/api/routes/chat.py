@@ -20,7 +20,7 @@ def create_chat_completion(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    model, target_url, request_body = build_chat_request(session, payload, user)
+    model, target_url, request_body, fallback_models = build_chat_request(session, payload, user)
     if payload.stream:
-        return stream_chat_completion(model, target_url, request_body)
+        return stream_chat_completion(model, target_url, request_body, fallback_models)
     return fetch_chat_completion(model, target_url, request_body)

@@ -46,7 +46,10 @@ async def ws_endpoint(ws: WebSocket):
                 data = await asyncio.wait_for(ws.receive_text(), timeout=60.0)
                 # 处理心跳
                 if data in ("ping", "pong"):
-                    await ws.send_text("pong")
+                    try:
+                        await ws.send_text("pong")
+                    except Exception:
+                        break
                 else:
                     logging.debug(f"[WS] user_id={user_id} 收到: {data}")
             except asyncio.TimeoutError:
@@ -56,13 +59,16 @@ async def ws_endpoint(ws: WebSocket):
                 except Exception:
                     logging.info(f"[WS] user_id={user_id} 心跳发送失败，断开")
                     break
+            except (ConnectionResetError, RuntimeError):
+                # 连接已关闭
+                break
     except WebSocketDisconnect:
         logging.info(f"[WS] user_id={user_id} 客户端断开")
+    except ConnectionResetError:
+        logging.info(f"[WS] user_id={user_id} 连接被重置")
     except Exception as e:
         logging.warning(f"[WS] user_id={user_id} 异常: {e}")
     finally:
         ws_manager.disconnect(user_id, ws)
-        try:
-            await ws.close()
-        except Exception:
-            pass
+        # 不要在 finally 中调用 ws.close()，连接可能已经关闭
+        # 强制关闭可能导致阻塞或异常

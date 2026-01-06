@@ -1,10 +1,9 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import fs from 'fs'
-import path from 'path'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), basicSsl()],
   define: {
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
     __VUE_OPTIONS_API__: true,
@@ -13,17 +12,98 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    // 启用 HTTPS（需要先生成证书）
-    // https: {
-    //   key: fs.readFileSync(path.resolve(__dirname, 'cert/key.pem')),
-    //   cert: fs.readFileSync(path.resolve(__dirname, 'cert/cert.pem'))
-    // },
+    https: true,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_BASE || 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
-      }
+        secure: false,
+      },
+      '/auth': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/dashboard': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/users': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/models': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/chat': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/contacts': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/web': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/roles': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/role-prompts': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/logs': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/diaries': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/albums': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/photos': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/skills': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/config': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/user': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/ws': {
+        target: 'ws://127.0.0.1:8001',
+        ws: true,
+        changeOrigin: true,
+      },
     }
   },
   build: {
