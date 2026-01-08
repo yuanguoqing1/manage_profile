@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import secrets
-from typing import Optional
+from typing import Optional, List
 
 import httpx
 from fastapi import HTTPException
@@ -18,6 +19,13 @@ from app.services.memory_service import (
     extract_and_save_memory,
     is_memory_enabled,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _get_all_models(session: Session) -> List[ModelConfig]:
+    """获取所有可用模型"""
+    return list(session.exec(select(ModelConfig)).all())
 
 
 def _select_model(session: Session, payload: ChatCompletionRequest) -> ModelConfig:
@@ -49,12 +57,23 @@ def build_chat_request(
     session: Session,
     payload: ChatCompletionRequest,
     user: User,
-) -> tuple[ModelConfig, str, dict]:
+) -> tuple[ModelConfig, str, dict, List[ModelConfig]]:
     model = _select_model(session, payload)
     if model.owner_id and user.role != Role.admin.value and user.id != model.owner_id:
         raise HTTPException(status_code=403, detail="无权使用该模型")
 
-    target_url = f"{model.base_url.rstrip('/')}/v1/chat/completions"
+    # 获取备用模型（排除当前模型和用户无权使用的模型）
+    all_models = _get_all_models(session)
+    fallback_models = [
+        m for m in all_models 
+        if m.id != model.id and (not m.owner_id or user.role == Role.admin.value or user.id == m.owner_id)
+    ]
+
+    # 如果 base_url 已包含 /chat/completions 则直接使用，否则拼接
+    if 'chat/completions' in model.base_url:
+        target_url = model.base_url
+    else:
+        target_url = f"{model.base_url.rstrip('/')}/chat/completions"
     system_prompts = [
         {
             "role": "system",
@@ -93,39 +112,81 @@ def build_chat_request(
     if payload.stream:
         request_body["stream"] = True
 
-    return model, target_url, request_body
+    return model, target_url, request_body, fallback_models
 
 
-def stream_chat_completion(model: ModelConfig, target_url: str, request_body: dict) -> StreamingResponse:
+def stream_chat_completion(model: ModelConfig, target_url: str, request_body: dict, fallback_models: List[ModelConfig] = None) -> StreamingResponse:
+    """流式聊天，支持模型故障转移"""
+    
+    def try_model(m: ModelConfig, url: str, body: dict):
+        """尝试单个模型"""
+        body_copy = body.copy()
+        body_copy["model"] = m.model_name
+        
+        with httpx.Client(timeout=30.0) as client:
+            with client.stream(
+                "POST",
+                url,
+                headers={"Authorization": f"Bearer {m.api_key}"},
+                json=body_copy,
+            ) as upstream_response:
+                if upstream_response.status_code >= 400:
+                    error_bytes = upstream_response.read()
+                    error_text = error_bytes.decode("utf-8", errors="replace")
+                    try:
+                        error_body = upstream_response.json()
+                        error_text = error_body.get("error", {}).get("message", error_text)
+                    except ValueError:
+                        pass
+                    return upstream_response.status_code, error_text, None
+                
+                # 成功，返回响应迭代器
+                chunks = list(upstream_response.iter_text())
+                return 200, None, chunks
+        
     def stream_response():
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                with client.stream(
-                    "POST",
-                    target_url,
-                    headers={"Authorization": f"Bearer {model.api_key}"},
-                    json=request_body,
-                ) as upstream_response:
-                    if upstream_response.status_code >= 400:
-                        error_bytes = upstream_response.read()
-                        error_text = error_bytes.decode("utf-8", errors="replace")
-                        try:
-                            error_body = upstream_response.json()
-                            error_text = error_body.get("error", {}).get("message", error_text)
-                        except ValueError:
-                            pass
-                        # 友好的错误提示
-                        if "Moderation" in error_text or "moderation" in error_text.lower():
-                            error_text = "内容被安全审核拦截，请修改消息内容后重试"
-                        raise HTTPException(
-                            status_code=upstream_response.status_code,
-                            detail=f"上游错误：{error_text}",
-                        )
-                    for chunk in upstream_response.iter_text():
+        # 尝试主模型
+        models_to_try = [model] + (fallback_models or [])
+        last_error = None
+        last_status = 500
+        
+        for i, m in enumerate(models_to_try):
+            try:
+                # 如果 base_url 已包含 /chat/completions 则直接使用，否则拼接
+                if 'chat/completions' in m.base_url:
+                    url = m.base_url
+                else:
+                    url = f"{m.base_url.rstrip('/')}/chat/completions"
+                status, error, chunks = try_model(m, url, request_body)
+                
+                if status == 200 and chunks:
+                    if i > 0:
+                        logger.info(f"模型 {model.name} 失败，已切换到备用模型 {m.name}")
+                    for chunk in chunks:
                         if chunk:
                             yield chunk
-        except httpx.RequestError as exc:
-            raise HTTPException(status_code=502, detail=f"请求上游模型失败：{exc}") from exc
+                    return
+                
+                # 记录错误
+                last_status = status
+                last_error = error
+                
+                # 429/502/503 错误尝试下一个模型
+                if status in (429, 502, 503) and i < len(models_to_try) - 1:
+                    logger.warning(f"模型 {m.name} 返回 {status}，尝试下一个模型")
+                    continue
+                    
+            except httpx.RequestError as exc:
+                last_error = str(exc)
+                last_status = 502
+                if i < len(models_to_try) - 1:
+                    logger.warning(f"模型 {m.name} 请求失败: {exc}，尝试下一个模型")
+                    continue
+        
+        # 所有模型都失败
+        if "Moderation" in (last_error or "") or "moderation" in (last_error or "").lower():
+            last_error = "内容被安全审核拦截，请修改消息内容后重试"
+        raise HTTPException(status_code=last_status, detail=f"上游错误：{last_error}")
 
     return StreamingResponse(stream_response(), media_type="text/event-stream")
 

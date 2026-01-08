@@ -81,31 +81,32 @@ def logout_user_online(token: str) -> None:
 
 
 def get_online_count(session: Session) -> int:
-    # 先清理过期token
-    purge_expired_tokens(session)
-    
-    # 从数据库获取有效token数量
-    db_count = session.exec(select(func.count()).select_from(AuthToken)).one()
-    
+    """获取在线人数（10分钟内有活跃请求的用户数）"""
     if redis_client:
-        # 获取Redis中的在线token集合
-        redis_tokens = redis_client.smembers("online_tokens")
-        
-        # 验证Redis中的token是否在数据库中存在
-        valid_tokens = set()
-        for token in redis_tokens:
-            if session.get(AuthToken, token):
-                valid_tokens.add(token)
-        
-        # 同步Redis，移除无效token
-        if len(valid_tokens) != len(redis_tokens):
-            redis_client.delete("online_tokens")
-            if valid_tokens:
-                redis_client.sadd("online_tokens", *valid_tokens)
-        
-        return len(valid_tokens)
+        try:
+            # 使用 Redis ZSET 存储用户活跃时间，获取10分钟内活跃的用户数
+            import time
+            cutoff_time = time.time() - 600  # 10分钟前
+            # 清理过期的活跃记录
+            redis_client.zremrangebyscore("user_activity", 0, cutoff_time)
+            # 获取活跃用户数
+            return redis_client.zcard("user_activity")
+        except Exception:
+            pass
     
-    return db_count
+    # 降级：返回有效 token 数量
+    purge_expired_tokens(session)
+    return session.exec(select(func.count()).select_from(AuthToken)).one()
+
+
+def update_user_activity(user_id: int) -> None:
+    """更新用户活跃时间"""
+    if redis_client:
+        try:
+            import time
+            redis_client.zadd("user_activity", {str(user_id): time.time()})
+        except Exception:
+            pass
 
 
 def get_register_count(session: Session) -> int:

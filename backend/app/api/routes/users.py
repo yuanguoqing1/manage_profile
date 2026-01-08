@@ -116,7 +116,7 @@ def redis_stats(session: Session = Depends(get_session)):
 @router.get("/dashboard")
 def dashboard(
     request: Request,
-    city: str = Query(default="威县", description="城市名称"),
+    city: str = Query(default="", description="城市名称"),
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
