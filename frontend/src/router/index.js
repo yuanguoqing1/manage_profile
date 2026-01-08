@@ -10,6 +10,7 @@ export const routes = [
   { path: '/diary', name: 'diary', menu: 'diary', requiresAuth: true },
   { path: '/album', name: 'album', menu: 'album', requiresAuth: true },
   { path: '/github-trending', name: 'github-trending', menu: 'github-trending' },
+  { path: '/csgo', name: 'csgo', menu: 'csgo' },
   { path: '/users', name: 'users', menu: 'users', requiresAdmin: true },
   { path: '/config', name: 'config', menu: 'config', requiresAdmin: true },
   { path: '/logs', name: 'logs', menu: 'logs', requiresAdmin: true },

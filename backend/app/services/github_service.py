@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Redis 缓存配置
 CACHE_KEY = "github:trending:python"
-CACHE_TTL = 3600  # 1 小时
+CACHE_TTL = 86400  # 1 天（24小时）
 
 # GitHub API 配置
 GITHUB_API_URL = "https://api.github.com/search/repositories"
@@ -60,15 +60,15 @@ def _get_redis_client() -> Optional[redis.Redis]:
 def _build_search_query() -> str:
     """构建 GitHub 搜索查询字符串
     
-    搜索当月创建或更新的 Python 项目
+    搜索当月创建的热门 Python 项目
     """
     # 获取当月第一天
     today = datetime.now()
     first_day_of_month = today.replace(day=1)
     date_str = first_day_of_month.strftime("%Y-%m-%d")
     
-    # 构建查询：Python 语言，当月更新，按星标排序
-    query = f"language:python pushed:>={date_str}"
+    # 构建查询：Python 语言，当月创建，按星标排序
+    query = f"language:python created:>={date_str}"
     return query
 
 

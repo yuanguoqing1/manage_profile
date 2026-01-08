@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
+const backend_client = 'http://127.0.0.1:8001'
 export default defineConfig({
   plugins: [vue(), basicSsl()],
   define: {
@@ -15,87 +16,87 @@ export default defineConfig({
     https: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/auth': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/dashboard': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/users': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/models': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/chat': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/contacts': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/web': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/roles': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/role-prompts': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/logs': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/diaries': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/albums': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/photos': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/skills': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/config': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
       '/user': {
-        target: 'http://127.0.0.1:8001',
+        target: backend_client,
         changeOrigin: true,
         secure: false,
       },
