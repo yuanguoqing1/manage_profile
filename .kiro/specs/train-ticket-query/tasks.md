@@ -14,7 +14,7 @@
   - 在app/api/router.py中注册train路由
   - _Requirements: 9.1_
 
-- [x] 2. 实现缓存管理器
+- [ ] 2. 实现缓存管理器
   - [x] 2.1 实现CacheManager类
     - 实现get、set、delete方法
     - 实现generate_cache_key方法用于生成一致的缓存键
@@ -27,8 +27,8 @@
     - **Property 19: 缓存过期重新请求** - 验证缓存过期后重新请求
     - _Requirements: 8.1, 8.2, 8.3_
 
-- [ ] 3. 实现数据模型
-  - [ ] 3.1 创建数据模型类
+- [x] 3. 实现数据模型
+  - [x] 3.1 创建数据模型类
     - 在app/models/创建train.py
     - 实现Station、SeatInfo、TrainInfo、TrainQueryResponse模型
     - 实现QueryHistory模型用于保存查询历史
@@ -40,8 +40,8 @@
     - 测试模型序列化和反序列化
     - _Requirements: 1.2, 4.1, 4.2_
 
-- [ ] 4. 实现12306 API集成
-  - [ ] 4.1 实现站点数据加载和搜索
+- [x] 4. 实现12306 API集成
+  - [x] 4.1 实现站点数据加载和搜索
     - 在TrainService中实现load_stations方法加载12306站点数据
     - 实现search_stations方法支持名称和拼音搜索
     - 解析12306的station_name.js文件格式
@@ -52,7 +52,7 @@
     - **Property 2: 站点信息完整性** - 验证站点显示包含名称和代码
     - _Requirements: 1.1, 1.2, 1.4_
   
-  - [ ] 4.3 实现车次查询功能
+  - [x] 4.3 实现车次查询功能
     - 实现query_trains方法调用12306查询接口
     - 配置正确的请求头和参数
     - 实现超时和重试逻辑
@@ -63,8 +63,8 @@
     - **Property 6: 查询结果完整性** - 验证返回所有车次信息
     - _Requirements: 3.1, 3.2_
 
-- [ ] 5. 实现数据解析逻辑
-  - [ ] 5.1 实现12306数据解析器
+- [x] 5. 实现数据解析逻辑
+  - [x] 5.1 实现12306数据解析器
     - 实现parse_train_data函数解析12306的管道分隔格式
     - 实现parse_seat_info函数解析座位信息
     - 处理各种座位类型（商务座、一等座、二等座、硬座、硬卧、软卧）
@@ -81,8 +81,8 @@
     - 测试边界情况（空数据、格式错误）
     - _Requirements: 3.5_
 
-- [ ] 6. 实现TrainService核心逻辑
-  - [ ] 6.1 集成缓存到查询流程
+- [x] 6. 实现TrainService核心逻辑
+  - [x] 6.1 集成缓存到查询流程
     - 在query_trains中实现缓存检查逻辑
     - 实现_get_cached_result和_set_cached_result方法
     - 在响应中添加from_cache和query_time标志
@@ -92,7 +92,7 @@
     - **Property 20: 缓存响应标注** - 验证缓存响应包含标志和时间戳
     - _Requirements: 8.4_
   
-  - [ ] 6.3 实现站点选择和保存
+  - [x] 6.3 实现站点选择和保存
     - 实现save_selected_station方法
     - 实现get_selected_stations方法
     - _Requirements: 1.3_
@@ -106,14 +106,14 @@
   - 确保TrainService的所有方法正常工作
   - 如有问题请询问用户
 
-- [ ] 8. 实现API路由和验证
-  - [ ] 8.1 实现车站搜索API端点
+- [x] 8. 实现API路由和验证
+  - [x] 8.1 实现车站搜索API端点
     - 实现GET /api/train/stations端点
     - 添加参数验证（keyword最小长度1）
     - 实现依赖注入get_train_service
     - _Requirements: 1.1, 9.1, 9.2_
   
-  - [ ] 8.2 实现车次查询API端点
+  - [x] 8.2 实现车次查询API端点
     - 实现GET /api/train/query端点
     - 添加参数验证（from_station, to_station, date）
     - 实现日期范围验证（当前日期起30天内）
@@ -123,7 +123,7 @@
     - **Property 4: 日期验证规则** - 验证接受30天内日期并拒绝其他日期
     - _Requirements: 2.2_
   
-  - [ ] 8.4 实现刷新查询API端点
+  - [x] 8.4 实现刷新查询API端点
     - 实现GET /api/train/refresh端点绕过缓存
     - 复用query_trains逻辑但跳过缓存检查
     - _Requirements: 5.5, 8.5_
@@ -134,13 +134,13 @@
     - **Property 23: API响应结构一致性** - 验证所有响应包含状态码和错误信息
     - _Requirements: 9.2, 9.3, 9.5_
 
-- [ ] 9. 实现错误处理
-  - [ ] 9.1 创建自定义异常类
+- [x] 9. 实现错误处理
+  - [x] 9.1 创建自定义异常类
     - 在app/core/exceptions.py中添加NetworkError、API12306Error、DataParseError、ValidationError
     - 实现异常的错误码和消息
     - _Requirements: 7.1, 7.2, 7.3_
   
-  - [ ] 9.2 实现全局异常处理器
+  - [x] 9.2 实现全局异常处理器
     - 在app/main.py中添加异常处理中间件
     - 实现统一的ErrorResponse格式
     - 处理所有自定义异常类型
@@ -156,8 +156,8 @@
     - 测试参数不完整场景
     - _Requirements: 7.1, 7.3, 7.4_
 
-- [ ] 10. 实现查询历史功能
-  - [ ] 10.1 实现查询历史保存
+- [x] 10. 实现查询历史功能
+  - [x] 10.1 实现查询历史保存
     - 在TrainService中实现save_query_history方法
     - 实现最多保存10条的逻辑
     - 使用数据库或本地存储
@@ -168,7 +168,7 @@
     - **Property 14: 历史记录数量限制** - 验证只保留最近10条
     - _Requirements: 6.1, 6.2_
   
-  - [ ] 10.3 实现查询历史查询API
+  - [x] 10.3 实现查询历史查询API
     - 实现GET /api/train/history端点
     - 返回用户的查询历史列表
     - _Requirements: 6.3_
@@ -182,35 +182,35 @@
   - 使用Postman或curl测试所有API端点
   - 如有问题请询问用户
 
-- [ ] 12. 实现前端查询表单组件
-  - [ ] 12.1 创建StationSelector组件
+- [x] 12. 实现前端查询表单组件
+  - [x] 12.1 创建StationSelector组件
     - 在frontend/src/components/train/StationSelector.vue中创建组件
     - 实现站点搜索输入框
     - 实现搜索结果下拉列表
     - 实现防抖搜索
     - _Requirements: 1.1, 1.2_
   
-  - [ ] 12.2 创建DatePicker组件
+  - [x] 12.2 创建DatePicker组件
     - 在frontend/src/components/train/DatePicker.vue中创建组件
     - 使用原生日期选择器或第三方库
     - 限制日期范围（今天到30天后）
     - _Requirements: 2.1, 2.2_
   
-  - [ ] 12.3 创建查询表单
+  - [x] 12.3 创建查询表单
     - 在frontend/src/views/TrainQueryView.vue中创建主视图
     - 集成StationSelector和DatePicker
     - 实现查询按钮和加载状态
     - _Requirements: 1.1, 2.1, 3.1_
 
-- [ ] 13. 实现前端查询逻辑
-  - [ ] 13.1 创建useTrainQuery组合式函数
+- [x] 13. 实现前端查询逻辑
+  - [x] 13.1 创建useTrainQuery组合式函数
     - 在frontend/src/composables/useTrainQuery.js中创建
     - 实现queryTrains方法调用后端API
     - 实现refreshQuery方法绕过缓存
     - 管理loading和error状态
     - _Requirements: 3.1, 5.5_
   
-  - [ ] 13.2 实现查询历史保存
+  - [x] 13.2 实现查询历史保存
     - 在useTrainQuery中实现saveQueryHistory方法
     - 使用localStorage保存历史
     - 实现最多10条的限制
@@ -222,15 +222,15 @@
     - 使用Vitest进行测试
     - _Requirements: 3.1, 6.1_
 
-- [ ] 14. 实现前端结果展示组件
-  - [ ] 14.1 创建TrainList组件
+- [x] 14. 实现前端结果展示组件
+  - [x] 14.1 创建TrainList组件
     - 在frontend/src/components/train/TrainList.vue中创建
     - 显示车次列表
     - 实现加载状态和空状态
     - 实现刷新按钮
     - _Requirements: 4.1, 4.2, 5.5_
   
-  - [ ] 14.2 创建TrainItem组件
+  - [x] 14.2 创建TrainItem组件
     - 在frontend/src/components/train/TrainItem.vue中创建
     - 显示单个车次的详细信息
     - 显示车次号、时间、时长
@@ -243,8 +243,8 @@
     - **Property 12: 余票显示格式** - 验证余票格式正确
     - _Requirements: 4.1, 4.2, 5.1, 5.2, 5.3_
 
-- [ ] 15. 实现车次排序和过滤
-  - [ ] 15.1 实现车次排序功能
+- [x] 15. 实现车次排序和过滤
+  - [x] 15.1 实现车次排序功能
     - 在TrainList组件中实现排序逻辑
     - 默认按出发时间升序排序
     - 可选按时长、票价排序
@@ -254,13 +254,13 @@
     - **Property 10: 车次排序不变性** - 验证排序后按时间升序
     - _Requirements: 4.4_
   
-  - [ ] 15.3 实现车次类型过滤
+  - [x] 15.3 实现车次类型过滤
     - 添加车次类型筛选器（高铁/动车/普通）
     - 根据车次号首字母识别类型
     - _Requirements: 4.5_
 
-- [ ] 16. 实现查询历史组件
-  - [ ] 16.1 创建QueryHistory组件
+- [x] 16. 实现查询历史组件
+  - [x] 16.1 创建QueryHistory组件
     - 在frontend/src/components/train/QueryHistory.vue中创建
     - 显示最近10条查询历史
     - 实现点击历史记录填充表单
@@ -271,40 +271,40 @@
     - **Property 16: 历史记录回填** - 验证点击历史记录填充表单
     - _Requirements: 6.4_
 
-- [ ] 17. 实现前端错误处理
-  - [ ] 17.1 创建错误处理工具
+- [x] 17. 实现前端错误处理
+  - [x] 17.1 创建错误处理工具
     - 在frontend/src/utils/errorHandler.js中创建handleTrainError函数
     - 根据错误类型显示不同提示
     - 集成到useTrainQuery中
     - _Requirements: 7.1, 7.2, 7.3, 7.4_
   
-  - [ ] 17.2 创建通知组件
+  - [x] 17.2 创建通知组件
     - 创建Toast或Notification组件显示错误
     - 支持不同类型（error/warning/info）
     - _Requirements: 7.1, 7.2, 7.3_
 
-- [ ] 18. 添加路由和导航
-  - [ ] 18.1 配置前端路由
+- [x] 18. 添加路由和导航
+  - [x] 18.1 配置前端路由
     - 在frontend/src/router/index.js中添加/train路由
     - 配置TrainQueryView为路由组件
     - _Requirements: 9.1_
   
-  - [ ] 18.2 添加导航链接
+  - [x] 18.2 添加导航链接
     - 在Header组件中添加"火车票查询"导航链接
     - _Requirements: 9.1_
 
-- [ ] 19. 样式和用户体验优化
-  - [ ] 19.1 实现响应式布局
+- [x] 19. 样式和用户体验优化
+  - [x] 19.1 实现响应式布局
     - 确保在移动设备上正常显示
     - 使用CSS Grid或Flexbox布局
     - _Requirements: 4.1, 4.2_
   
-  - [ ] 19.2 添加加载动画
+  - [x] 19.2 添加加载动画
     - 在查询时显示加载动画
     - 使用LoadingSpinner组件
     - _Requirements: 3.1_
   
-  - [ ] 19.3 优化交互体验
+  - [x] 19.3 优化交互体验
     - 添加输入验证提示
     - 添加成功查询的反馈
     - 优化按钮状态和禁用逻辑

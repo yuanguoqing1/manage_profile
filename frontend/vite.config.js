@@ -1,10 +1,16 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import basicSsl from '@vitejs/plugin-basic-ssl'
+import path from 'path'
 
 const backend_client = 'http://127.0.0.1:8001'
 export default defineConfig({
   plugins: [vue(), basicSsl()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src')
+    }
+  },
   define: {
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
     __VUE_OPTIONS_API__: true,

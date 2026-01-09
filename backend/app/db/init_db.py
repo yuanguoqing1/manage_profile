@@ -10,6 +10,7 @@ from app.models import diary as diary_models  # noqa: F401
 from app.models import message as message_models  # noqa: F401
 from app.models import token as token_models  # noqa: F401
 from app.models import user as user_models  # noqa: F401
+from app.models import train as train_models  # noqa: F401
 
 
 def create_db_and_tables() -> None:

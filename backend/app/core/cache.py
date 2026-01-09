@@ -32,9 +32,14 @@ class CacheManager:
         """
         try:
             value = await self.redis.get(key)
-            return value.decode('utf-8') if value else None
+            if value is None:
+                return None
+            # 如果已经是字符串（decode_responses=True），直接返回
+            if isinstance(value, str):
+                return value
+            # 否则解码
+            return value.decode('utf-8')
         except Exception as e:
-            # 缓存失败不应该影响主流程
             print(f"Cache get error: {e}")
             return None
     

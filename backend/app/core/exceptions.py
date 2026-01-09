@@ -45,3 +45,24 @@ class RateLimitError(AppException):
 
     def __init__(self, message: str = "请求过于频繁"):
         super().__init__(message, status_code=429)
+
+
+class NetworkError(AppException):
+    """网络连接错误异常。"""
+
+    def __init__(self, message: str = "网络连接失败，请检查网络设置"):
+        super().__init__(message, status_code=503)
+
+
+class API12306Error(AppException):
+    """12306 API错误异常。"""
+
+    def __init__(self, message: str = "12306接口返回错误", status_code: int = 502):
+        super().__init__(message, status_code=status_code)
+
+
+class DataParseError(AppException):
+    """数据解析错误异常。"""
+
+    def __init__(self, message: str = "数据解析失败"):
+        super().__init__(message, status_code=500)

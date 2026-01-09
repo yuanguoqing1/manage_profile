@@ -19,3 +19,6 @@ types-redis==4.6.0.11
 apscheduler==3.10.4
 beautifulsoup4==4.12.2
 lxml==5.1.0
+# 12306 浏览器自动化
+selenium==4.16.0
+webdriver-manager==4.0.1
